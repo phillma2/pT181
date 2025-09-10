@@ -11,3 +11,7 @@ PCN
 - blast.2.sh - find known chromosomal genes & tetK in genomes
 - bwa.sh - fastq to sam
 - samtools-view-sort-depth.sh - read depth at all sites
+
+phitest
+- ska.7988.sh - make skf file and alignment of all pT181 contigs (n = 7988)
+- phitest.sh - perform phi test for recombination

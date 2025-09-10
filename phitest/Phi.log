@@ -1,0 +1,28 @@
+Reading sequence file 7988-phitest.aln
+Allocating space for 7988 taxa and 4243 sites
+Alignment looks like a valid DNA alignment.
+Estimated diversity is (pairwise deletion - ignoring missing/ambig):  0.0%
+Found 165 informative sites.
+Writing alignment of informative sites to: Phi.inf.sites
+Writing list of informative sites to:      Phi.inf.list
+ 0   (99.3): oooooooooooooooooooooooooooooooooooooooooooooooooo
+ 1   ( 0.7): o
+
+Using a window size of 100 with k as 4
+
+Calculating analytical mean and variance
+
+                      PHI Values
+                      ----------
+              Analytical    (0) Permutations
+
+Mean:          7.02e-03          --
+Variance:      9.75e-06          --
+Observed:      6.15e-03          6.15e-03   
+
+
+       p-Value(s)
+       ----------
+
+PHI (Normal):        3.91e-01
+

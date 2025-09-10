@@ -1,0 +1,34 @@
+nohup: ignoring input
+
+SKA: Split Kmer Analysis
+Version: 1.0
+Citation: TBA
+
+Creating split 15mers for allfulllength.novector.fasta 
+
+Creating split kmers for allfulllength.novector.fasta
+Writing split kmers to allfulllength.novector.fasta.skf
+Done
+Total time required: 512.346s
+
+SKA: Split Kmer Analysis
+Version: 1.0
+Citation: TBA
+
+Creating reference free alignment for allfulllength.novector.fasta.skf 
+Variable sites present in more than 90% of isolates will be included
+Output will be written to 7988-phitest
+
+Collecting number of samples 
+Found 7988 samples in 1 files
+
+7988 samples will be included in the alignment
+Keeping variants for which at least 7189 samples include kmer matches
+
+Reading allfulllength.novector.fasta.skf
+12618259 kmers identified from 7988 samples in 1 files
+Expected number of missed alignments = 351.548
+Printing alignment of 4243 sites
+Warning: CP121503.1 only matches 36.6722% of kmers in the alignment
+Done
+Total time required: 388.287s
