@@ -1,0 +1,435 @@
+---
+title: "glmm.pcn.reduced"
+output: html_document
+date: "2025-06-10"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r load packages}
+library(glmmTMB)
+library(tidyverse)
+library(ICC)
+library(emmeans)
+library(dendextend)
+library(performance)
+```
+
+```{r}
+set2.5backup <- read_delim("set2.5_20250324_safety.tsv", 
+    delim = "\t", escape_double = FALSE, 
+    trim_ws = TRUE)
+```
+
+make all the SC the same
+```{r}
+set2.5backup$centername <- set2.5backup$`Center Name` %>%
+  str_replace("WELLCOME SANGER INSTITUTE", "SC") %>%
+  str_replace("THE WELLCOME TRUST SANGER INSTITUTE", "SC")
+```
+
+```{r}
+setMC <- set2.5backup %>%
+  filter(PCN > 2)
+
+setpostMC <- set2.5backup %>%
+  filter(PCN > 2) %>%
+  filter(prepost == "post")
+```
+
+```{r}
+setpostMC %>%
+  select(BioProject, centername, Instrument) %>%
+  group_by(BioProject, centername, Instrument) %>%
+  mutate(count3 = n()) %>%
+  group_by(BioProject) %>%
+  mutate(countBP = n()) %>%
+  group_by(BioProject, Instrument) %>%
+  mutate(BPins = n()) %>%
+  group_by(BioProject, centername) %>%
+  mutate(BPcen = n()) %>%
+  filter(countBP != count3) %>%
+  ungroup() %>%
+  distinct(BioProject)
+```
+2 BioProjects were sequenced on more than 2 models of instrument, 1 may have been (just wasn't specific enough)
+Each BioProject was sequenced at 1 seqcenter max -- no bioprojects spread across sequencing centers
+if we account for bioproject, don't worry about sequencing center
+
+should include instrument as a random effect - do not expect strain to have an effect on this. time might, as that might influence what reagents/prep is used
+
+within each bioproject (random), do we see an effect of strain (fixed)
+or rather, I should say,
+within a strain (fixed), do we see an effect of bioproject (random)
+
+```{r}
+m9 = glmmTMB(PCN ~ as.numeric(year) + strain + 
+          (1 | strain:BioProject),
+        data = setpostMC,
+             family = Gamma(link="log"))
+summary(m9)
+```
+
+How many BioProjects does each strain have...?
+
+```{r}
+setpostMC %>%
+  select(strain, BioProject) %>%
+  distinct() %>%
+  group_by(strain) %>%
+  mutate(bpct = n()) %>%
+  ungroup() %>%
+  select(strain, bpct) %>%
+  distinct() %>%
+  arrange(bpct)
+```
+Some strains only have 1 BioProject, some have more
+
+```{r}
+setpostMCgt10 <- setpostMC %>%
+  group_by(strain) %>%
+  mutate(strainCount = n()) %>%
+  select(strain, strainCount) %>%
+  distinct() %>%
+  #arrange(desc(strainCount))
+  filter(strainCount > 10)
+```
+
+```{r}
+set395 <- left_join(setpostMCgt10, setpostMC, by = "strain")
+```
+
+
+```{r}
+m10 = glmmTMB(PCN ~ as.numeric(year) + strain + 
+          (1 | strain:BioProject),
+        data = set395,
+             family = Gamma(link="log"))
+summary(m10)
+```
+Okay so this might be a tough sell.......
+
+Let's plot it and look
+```{r}
+set395 %>%
+  ggplot(aes(x = as.numeric(year), y = PCN, color = BioProject)) +
+  geom_point() +
+  facet_wrap(~strain, scales = "free") +
+  theme(legend.position="none") 
+```
+
+let's just look at effect of multicopy PCN overtime by strain
+```{r}
+m11 = glmmTMB(PCN ~ as.numeric(year) + strain + (1 | strain:BioProject),
+        data = setMC,
+             family = Gamma(link="log"))
+summary(m11)
+```
+
+```{r}
+setMC$numYear <- setMC$year %>%
+  as.numeric()
+```
+
+
+```{r}
+m17 = glmmTMB(PCN ~ numYear + strain + (1 | numYear:BioProject) +
+                (1 | strain:BioProject),
+        data = setMC,
+             family = Gamma(link="log"))
+summary(m17)
+```
+
+```{r}
+m12 = glmmTMB(PCN ~ as.numeric(year) + strain,
+        data = setMC,
+             family = Gamma(link="log"))
+
+m13 = glmmTMB(PCN ~ as.numeric(year) + strain +
+                (1|Instrument) + (1|centername),
+        data = setMC,
+             family = Gamma(link="log"))
+
+m14 = glmmTMB(PCN ~ as.numeric(year) + strain + (1|centername),
+        data = setMC,
+             family = Gamma(link="log"))
+```
+
+
+```{r}
+#anova(m11, m13, m12)
+#anova(m11, m12) # m11 is better than simplest (m12)
+anova(m11, m14, m12) 
+```
+
+```{r changing model}
+m15 = glmmTMB(PCN ~ as.numeric(year) + strain,
+        data = setMC,
+             family = lognormal(link = "log"))
+
+m16 = glmmTMB(PCN ~ as.numeric(year) + strain +
+                (1|strain:BioProject),
+        data = setMC,
+             family = lognormal(link = "log"))
+
+summary(m15)
+summary(m16)
+```
+
+# learning about bioproject size
+```{r}
+bbp <- setMC %>%
+  select(BioProject#, strain
+         ) %>%
+  group_by(BioProject) %>%
+  mutate(count = n()) %>%
+  distinct() %>%
+  arrange(desc(count)) %>%
+  filter(count >= 10)
+```
+
+```{r}
+left_join(bbp, setMC, by = "BioProject") %>%
+  ggplot(aes(x = numYear, y = PCN, color = strain)) +
+  geom_point()
+```
+
+```{r early big bioprojects}
+left_join(bbp, setMC, by = "BioProject") %>%
+  filter(prepost == "pre") %>%
+  ggplot(aes(x = numYear, y = PCN, color = BioProject)) +
+  geom_point()
+```
+
+```{r}
+bbbp <- left_join(bbp, setMC, by = "BioProject")
+```
+
+```{r}
+m18 = glmmTMB(PCN ~ numYear + strain +
+                (1|strain:BioProject) +
+                (numYear|BioProject),
+        data = bbbp,
+             family = Gamma(link="log"))
+summary(m18)
+```
+
+```{r}
+m19 = glmmTMB(PCN ~ numYear + strain +
+                (1|strain:BioProject) +
+                (1|numYear:BioProject),
+        data = bbbp,
+             family = Gamma(link="log"))
+summary(m19)
+```
+
+should I assess evenness of BioProjects...?
+
+# trying again with large strains within large bioprojects
+
+```{r}
+topstrainlist <- bbbp %>%
+  ungroup() %>%
+  select(strain) %>%
+  group_by(strain) %>%
+  mutate(nstrain = n()) %>%
+  distinct()%>%
+  arrange(desc(nstrain)) %>%
+  filter(nstrain >=10)
+```
+
+```{r}
+topstrainbp <- left_join(topstrainlist, bbbp, by = "strain")
+
+topstrainbp %>%
+  ggplot(aes(x = numYear, y = PCN, color = strain)) +
+  geom_point()
+
+topstrainbp %>%
+  ungroup() %>%
+  group_by(BioProject) %>%
+  mutate(bpcount = n()) %>%
+  filter(bpcount >= 10) %>%
+  ggplot(aes(x = numYear, y = PCN, color = BioProject)) +
+  geom_point() +
+  facet_wrap(~strain, scales = "free")
+
+topstrainbp %>%
+  ungroup() %>%
+  group_by(BioProject) %>%
+  mutate(bpcount = n()) %>%
+  filter(bpcount >= 10) %>%
+  ggplot(aes(x = numYear, y = PCN, color = strain)) +
+  geom_point() +
+  facet_wrap(~BioProject, scales = "free")
+```
+
+```{r}
+m20 = glmmTMB(PCN ~ numYear + strain +
+                (1|strain:BioProject) +
+                (1|numYear:BioProject),
+        data = topstrainbp,
+             family = Gamma(link="log"))
+summary(m20)
+```
+
+
+let's say - only include strain/bioproject sets that have >5 samples in that strain/bioproject...?
+
+```{r pcn by year/strain/bioproject for top strain/bp combos}
+setMC %>%
+  select(strain, BioProject) %>%
+  group_by(strain, BioProject) %>%
+  mutate(count = n()) %>%
+  distinct() %>%
+  filter(count >= 5) %>%
+  left_join(., setMC, by = c("strain", "BioProject")) %>%
+  ggplot(aes(x = numYear, y = PCN, color = BioProject)) +
+  geom_point() +
+  facet_wrap(~strain, scales = "free")
+```
+
+```{r set with top strains and bp}
+oe5 <- setMC %>%
+  select(strain, BioProject) %>%
+  group_by(strain, BioProject) %>%
+  mutate(count = n()) %>%
+  distinct() %>%
+  filter(count >= 5) %>%
+  ungroup() %>%
+  left_join(., setMC, by = c("strain", "BioProject"))
+```
+
+```{r palette}
+strain.c11 <- c(
+  "S99.5_10" = "dodgerblue2", #1
+  "S99.5_11" = "palegreen2",
+  "S99.5_15" = "orchid1",
+  "S99.5_17" = "blue1",
+  "S99.5_2" = "#E31A1C", # red, 2
+  "S99.5_20" = "darkturquoise",
+  "S99.5_4" = "#CAB2D6", # lt purple
+  "S99.5_49" = "#FB9A99",
+  "S99.5_5" = "#FF7F00", # orange, 5
+  "S99.5_7" = "gold1",
+  "S99.5_8" = "skyblue2"
+)
+```
+
+
+```{r pcn plots}
+oe5 %>%
+  ggplot(aes(x = numYear, y = PCN, color = strain)) +
+  geom_point() +
+  scale_y_sqrt() +
+  theme_bw() +
+  # geom_smooth(method = "lm") + # too many slopes -> too messy
+  xlab("Year of Collection") +
+  # scale_color_viridis(discrete=TRUE, option="inferno")
+  scale_color_manual(values = strain.c11)
+
+oe5 %>%
+  filter(PCN < 50) %>%
+  ggplot(aes(x = numYear, y = PCN, color = strain)) +
+  geom_point()
+
+oe5 %>%
+  filter(prepost=="post") %>%
+  ggplot(aes(x = numYear, y = PCN, color = BioProject)) +
+  geom_point() +
+  facet_wrap(~strain, scales = "free")
+```
+
+```{r factor & relevel}
+oe5$strainFac <- factor(oe5$strain)
+
+oe5$strainFac <- relevel(oe5$strainFac, ref = "S99.5_8")
+```
+
+```{r oe5 by strain and bioproject boxplot}
+oe5 %>%
+  ggplot(aes(x = forcats::fct_reorder(strainFac, PCN, .fun = median),
+             y = PCN, color = BioProject)) +
+  geom_boxplot() +
+  theme_bw() +
+  theme(legend.position = "none") +
+  scale_y_sqrt() +
+  labs(x = "Strain (colored by BioProject)") #+
+  #scale_color_viridis(discrete=TRUE, option="inferno")
+```
+
+```{r}
+oe5 %>%
+  mutate(avgPCN = mean(PCN)) %>%
+  group_by(strain) %>%
+  mutate(strainMean = mean(PCN),
+         straincount = n(),
+         strainSD = sd(PCN)) %>%
+  select(strain, strainMean, strainSD, avgPCN, straincount) %>%
+  distinct() %>%
+  arrange(desc(straincount))
+```
+
+```{r}
+m21 = glmmTMB(PCN ~ numYear + strainFac +
+                (1|strainFac:BioProject) +
+                (1|numYear:BioProject), # AIC is lower with them both included 
+        data = oe5,
+             family = Gamma(link="log"))
+summary(m21)
+```
+
+```{r}
+emmeans(m21, ~strainFac)
+
+pairs(emmeans(m21, ~strainFac), adjust = "tukey")
+
+emmeans(m21, pairwise ~strainFac)
+```
+
+```{r median PCN in pre vs post mc isolates}
+setMC %>%
+  group_by(prepost) %>%
+  mutate(medPCN = median(PCN)) %>%
+  select(prepost, medPCN) %>%
+  distinct()
+```
+
+```{r}
+performance(m21)
+r2(m21)
+icc(m21)
+```
+
+
+```{r}
+emm <- emmeans(m21, ~ strainFac)
+
+emm
+
+plot(emm, comparisons = TRUE, adjust = "tukey")
+contrast(emm, method = "eff")  # compares each level to the average
+
+emmeans(m21, pairwise ~ strainFac, adjust = "bh")
+contrast(emm, method = "trt.vs.ctrl", adjust = "bh")
+```
+
+| Strain    | Log(PCN) `emmean` | Back-transformed PCN (`exp(emmean)`) |
+| --------- | ----------------- | ------------------------------------ |
+| S99.5\_7  | 3.45              | \~31.5                               |
+| S99.5\_15 | 3.25              | \~25.8                               |
+| S99.5\_2  | 3.29              | \~26.8                               |
+| S99.5\_49 | 1.81              | \~6.1                                |
+| ...       | ...               | ...                                  |
+
+```{r}
+summary(emm, type = "response")
+```
+
+```{r how many strains in the n=455 df}
+oe5 %>%
+  select(strain) %>%
+  distinct()
+```
