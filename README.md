@@ -17,3 +17,8 @@ PCN
 phitest
 - ska.7988.sh - make skf file and alignment of all pT181 contigs (n = 7988)
 - phitest.sh - perform phi test for recombination
+
+rotation (of the plasmid)
+- samtools.sh - start all plasmids at same spot relative to blast hit
+- prelin.sh - remove extra header; prep for picard
+- picard.sh - normalize pt181 contigs
