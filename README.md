@@ -22,3 +22,7 @@ rotation (of the plasmid)
 - samtools.sh - start all plasmids at same spot relative to blast hit
 - prelin.sh - remove extra header; prep for picard
 - picard.sh - normalize pt181 contigs
+
+files found elsewhere
+- staphopia_v2_all_report.txt in Zenodo for Raghuram et al. 2024 msystems 
+(https://zenodo.org/records/10471309)
