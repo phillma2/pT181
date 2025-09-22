@@ -26,3 +26,5 @@ rotation (of the plasmid)
 files found elsewhere
 - staphopia_v2_all_report.txt in Zenodo for Raghuram et al. 2024 msystems 
 (https://zenodo.org/records/10471309)
+- isolate_substrain_strain_freq_st_CC.tsv same as above
+- dnaA_start_coords.gfs from v2 git

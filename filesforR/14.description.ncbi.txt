@@ -1,0 +1,15 @@
+sseqid	description	contigLength	position
+NZ_CP039996.1	Staphylococcus aureus subsp. aureus M013 plasmid pM013, complete sequence	21682	plasInt
+NZ_CP007658.1	Staphylococcus aureus strain V2200 plasmid pV2200, complete sequence	43396	plasInt
+NZ_CP015447.2	Staphylococcus aureus strain M92 chromosome, complete genome	3038845	chromInt
+NZ_CP017683.1	Staphylococcus aureus strain CFSAN007850 plasmid pCFSAN007850, complete sequence	39249	plasInt
+NZ_CP029172.1	Staphylococcus aureus strain PTDrAP2 chromosome, complete genome	2902681	chromInt
+NZ_CP029685.1	Staphylococcus aureus strain CMRSA-3 chromosome, complete genome	2958212	chromInt
+NZ_CP022902.1	Staphylococcus aureus strain 165 chromosome, complete genome	2892907	chromInt
+NZ_CP040802.1	Staphylococcus aureus strain S15 plasmid unnamed1, complete sequence	25946	plasInt
+NZ_CP058312.1	Staphylococcus aureus strain BLR-DV chromosome, complete genome	2969706	chromInt
+NZ_CP094762.1	Staphylococcus aureus strain IVB6232 plasmid unnamed3, complete sequence	4711	plasFree
+NZ_CP094767.1	Staphylococcus aureus strain IVB6215 plasmid unnamed3, complete sequence	4740	plasFree
+NZ_CP095114.1	Staphylococcus aureus strain IVB6157 plasmid unnamed2, complete sequence	4468	plasFree
+NZ_LS483309.1	Staphylococcus aureus strain NCTC9944 chromosome 1, complete sequence	2951503	chromInt
+NZ_LR027874.1	Staphylococcus aureus strain BPH2056 isolate BPH2056 chromosome 1	2999728	chromInt
