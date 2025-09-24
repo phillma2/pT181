@@ -1,0 +1,2635 @@
+---
+title: "pT181-reunify"
+author: "Megan Phillips"
+date: "5/22/2025"
+output: html_document
+---
+# Getting started
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r load all packages}
+library(tidyverse)
+library(RColorBrewer)
+library(cowplot)
+library(forcats)
+library(gggenes)
+library(ez)
+library(DescTools)
+library(ggpubfigs)
+library(ggpubr)
+library(FSA)
+library(ggstream)
+```
+
+```{r load sra metadata}
+### import all sra downloaded info
+pubmet_20150601_20191231 <- read_csv("pubmet-20150601-20191231.txt")
+pubmet_20200101_20220530 <- read_csv("pubmet-20200101-20220530.txt")
+pubmet_20220601_pres <- read_csv("pubmet-20220601-pres.txt")
+pubmet_onbefore20150530 <- read_csv("pubmet-onbefore20150530.txt")
+
+# combine
+c1 <- intersect(colnames(pubmet_20150601_20191231), colnames(pubmet_20200101_20220530))
+b1 <- rbind(pubmet_20150601_20191231[c1], pubmet_20200101_20220530[c1])
+
+c2 <- intersect(colnames(b1), colnames(pubmet_20220601_pres))
+b2 <- rbind(b1[c2], pubmet_20220601_pres[c2])
+
+c3 <- intersect(colnames(b2), colnames(pubmet_onbefore20150530))
+b3 <- rbind(b2[c3], pubmet_onbefore20150530[c3])
+
+#clean up the environment
+rm(pubmet_20150601_20191231)
+rm(pubmet_20200101_20220530)
+rm(pubmet_20220601_pres)
+rm(pubmet_onbefore20150530)
+```
+
+```{r load staphopia v2 report}
+staphopia_v2_all_report <- read_delim("staphopia_v2_all_report.txt", 
+                                      delim = "\t", escape_double = FALSE, 
+                                      trim_ws = TRUE)
+```
+
+```{r create datasets eg all86k}
+# reduce number of columns
+br3 <- b3 %>%
+  select(Run:Collection_Date)
+
+staphopia_v2_all_red <- staphopia_v2_all_report %>%
+  select(sample:estimated_genome_size, mlst_blast_st:mlst_ariba_yqil)
+
+all86k <- left_join(staphopia_v2_all_red, br3,
+                      by = c("sample" = "Experiment"))
+```
+
+```{r 83k confirmation}
+all86k %>%
+  distinct(sample) # 83,366 unique experiments in the SA dataset
+```
+
+loading sccmec data for s.aureus from allthebacteria
+```{r load sccmec data}
+allthebacteria_sccmec <- read_delim("allthebacteria-sccmec.tsv", 
+    delim = "\t", escape_double = FALSE, 
+    trim_ws = TRUE)
+```
+
+join sccmec with the staphopia set 
+```{r add sccmec to all86k}
+all86k <- left_join(all86k, allthebacteria_sccmec, by = c("BioSample" = "sample")) 
+```
+
+Loading in ST & CC information
+```{r load st & cc}
+# which STs are in which CCs
+stcc <- read_delim("st-cc.tsv", 
+    delim = ",", #escape_double = FALSE, 
+    trim_ws = TRUE)
+
+stcc$ST <- str_replace(stcc$ST, "ST", "")
+```
+
+```{r add stcc to all86k}
+all86k <- left_join(all86k, stcc,
+                    by = c("mlst_blast_st" = "ST"))
+```
+
+```{r how many st & cc?}
+all86k$mlst_blast_st %>%
+  fct_lump_n(10) %>%
+  table()
+#gplot(aes(x = mlst_blast_st))
+
+all86k$CC %>%
+  fct_lump_n(10) %>%
+  table()
+```
+
+import Vishnu's strain groups
+```{r import strain}
+vstraingroup <- read_delim("isolate_substrain_strain_freq_st_CC.tsv", 
+    delim = "\t", escape_double = FALSE, 
+    trim_ws = TRUE)
+```
+
+adding strain group to all86k df
+```{r add strain to all86k}
+all86k <- left_join(all86k, vstraingroup,
+          by = c("sample" = "isolate"))
+
+all86k %>%
+  filter(!is.na(strain)) %>%
+  distinct(sample) #56,770
+```
+
+let's get the 337 complete genomes that start with dnaA
+```{r load dnaA-1st complete genomes}
+dnaA_start_coords <- read_delim("fromV2git/timsfigsData/dnaA_start_coords.gfs", 
+    delim = "\t", escape_double = FALSE, 
+    trim_ws = TRUE)
+
+#info on the 14 integrated complete dnaA-1st
+X14_description_ncbi <- read_delim("14.description.ncbi.txt", 
+    delim = "\t", escape_double = FALSE, 
+    trim_ws = TRUE)
+```
+
+```{r load complete over threshold}
+completeover <- read_csv("completegenomes_samplesoverorequal4400.txt", 
+    col_names = FALSE)
+
+completeover <- completeover %>%
+  rename("sseqid" = "X1")
+
+completeblast <- read_delim("completegenomes.blast.1.out", 
+    delim = "\t", escape_double = FALSE, 
+    col_names = FALSE, trim_ws = TRUE)
+
+completeblast <- completeblast %>%
+  rename("qseqid" = "X1",
+         "sseqid" = "X2",
+         "pident" = "X3",
+         "length" = "X4",
+         "mismatch" = "X5",
+         "gapopen" = "X6",
+         "qstart" = "X7",
+         "qend" = "X8",
+         "sstart" = "X9",
+         "send" = "X10",
+         "evalue" = "X11",
+         "bitscore" = "X12")
+```
+
+load blast hit distribution
+```{r load hit lengths}
+totallength <- read_table2("samples-blasthit-totallength.txt")
+```
+
+```{r Load c25 color pal}
+c25 <- c(
+  "dodgerblue2",
+  "#E31A1C", # red
+  "green4",
+  "#6A3D9A", # purple
+  "#FF7F00", # orange
+  "black",
+  "gold1",
+  "skyblue2",
+  "#FB9A99", # lt pink
+  "palegreen2",
+  "#CAB2D6", # lt purple
+  "#FDBF6F", # lt orange
+  "gray70",
+  "khaki2",
+  "maroon",
+  "orchid1",
+  "deeppink1",
+  "blue1",
+  "steelblue4",
+  "darkturquoise",
+  "green1",
+  "yellow4",
+  "yellow3",
+  "darkorange4",
+  "brown"
+)
+
+barplot(rep(1, length(c25)), col = c25, names.arg = 1:length(c25))
+```
+
+```{r strain colors}
+strain.c25 <- c(
+  "S99.5_10" = "dodgerblue2", #1
+  "S99.5_11" = "palegreen2",
+  "S99.5_13" = "maroon",
+  "S99.5_15" = "orchid1",
+  "S99.5_16" = "deeppink1",
+  "S99.5_17" = "blue1",
+  "S99.5_18" = "steelblue4",
+  "S99.5_2" = "#E31A1C", # red, 2
+  "S99.5_20" = "darkturquoise",
+  "S99.5_23" = "green4", #3
+  "S99.5_24" = "darkorange4",
+  "S99.5_26" = "brown",
+  "S99.5_27" = "#6A3D9A", # purple, 4
+  "S99.5_4" = "#CAB2D6", # lt purple
+  "S99.5_45" = "green1",
+  "S99.5_49" = "#FB9A99", # lt pink
+  "S99.5_5" = "#FF7F00", # orange, 5
+  "S99.5_7" = "gold1",
+  "S99.5_8" = "skyblue2",
+  "Other" = "gray70"
+)
+
+allele.pallete <- c(
+  "S99.5_10" = "dodgerblue2", #1
+  "S99.5_11" = "palegreen2",
+  "S99.5_13" = "maroon",
+  "S99.5_15" = "orchid1",
+  "S99.5_16" = "deeppink1",
+  "S99.5_17" = "blue1",
+  "S99.5_18" = "steelblue4",
+  "S99.5_2" = "#E31A1C", # red, 2
+  "S99.5_20" = "darkturquoise",
+  "S99.5_23" = "green4", #3
+  "S99.5_24" = "darkorange4",
+  "S99.5_26" = "brown",
+  "S99.5_4" = "#CAB2D6", # lt purple
+  "S99.5_45" = "green1",
+  "S99.5_49" = "#FB9A99",
+  "S99.5_5" = "#FF7F00", # orange, 5
+  "S99.5_7" = "gold1",
+  "S99.5_8" = "skyblue2"
+)
+
+top7strain2.5 <- c(
+  "S99.5_10" = "dodgerblue2", #1
+  "S99.5_2" = "#E31A1C", # red, 2
+  "S99.5_23" = "green4", #3
+  "S99.5_27" = "#6A3D9A", # purple, 4
+  "S99.5_5" = "#FF7F00", # orange, 5
+  #"black",
+  "S99.5_7" = "gold1",
+  "S99.5_8" = "skyblue2",
+  "Other" = "gray70"
+)
+
+barplot(rep(1, length(strain.c25)), col = strain.c25, names.arg = 1:length(strain.c25)
+        )
+```
+
+
+```{r backup}
+set2.5backup <- read_delim("set2.5_20250324_safety.tsv", 
+    delim = "\t", escape_double = FALSE, 
+    trim_ws = TRUE)
+```
+
+# quick check: median pcn by time 
+```{r}
+set2.5backup %>%
+  filter(issinglecopy == F) %>%
+  select(PCN, prepost) %>%
+  group_by(prepost) %>%
+  mutate(mean = mean(PCN),
+         med = median(PCN)) %>%
+  select(prepost, mean, med) %>%
+  distinct()
+
+(14.53175 * 4440)/2800000 # post median %
+(55.68119 * 4440)/2800000 # post median %
+```
+
+
+# Spread across the species
+
+## process the dates
+Doing some date fixing
+```{r process Collection_Date metadata}
+sampdate_dateEntered <- all86k %>% 
+  filter(!is.na(Collection_Date), Collection_Date != "Missing",
+         Collection_Date != "missing",
+         Collection_Date != "NA",
+         Collection_Date != "not collected",
+         Collection_Date != "not available",
+         Collection_Date != "Not applicable",
+         Collection_Date != "not provided",
+         Collection_Date != "not applicable",
+         Collection_Date != "Not collected",
+         Collection_Date != "not determined",
+         Collection_Date != "Not Applicable",
+         Collection_Date != "Not available") %>%
+  distinct() 
+
+sampdate_dateUsable1 <- sampdate_dateEntered %>%
+  filter (Collection_Date != "1960/1970",
+         Collection_Date != "05/06/2010",
+         Collection_Date != "07-12-11",
+         Collection_Date != "2014-01/2015-08",
+         Collection_Date != "17-04-12",
+         Collection_Date != "19-04-12",
+         Collection_Date != "2014-11/2016-01",
+         Collection_Date != "1998/2012",
+         Collection_Date != "2006/2007",
+         Collection_Date != "0000",
+         Collection_Date != "1980's",
+         Collection_Date != "09.04.2010",
+         Collection_Date != "1994-09/2003-10",
+         Collection_Date != "2015-17")
+
+rm(sampdate_dateEntered)
+
+sampdate_dateUsable1$new_Date <- sampdate_dateUsable1$Collection_Date %>%
+  str_replace("2016-0.-../2016-1.*$", "2016") %>%
+  str_replace("2015-0.-../2015-1.-..", "2015") %>%
+  str_replace("2005-0.-../2005-1.-..", "2005") %>%
+  str_replace("2004-0.-../2004-1.-..", "2004") %>%
+  str_replace("2016-0./2016-1.", "2016") %>%
+  str_replace("2010-0.-../2010-1.-..", "2010") %>%
+  str_replace("^../../..$", "notspp") %>%
+  str_replace("^.././..$", "notspp") %>%
+  str_replace("^./../..$", "notspp") %>%
+  str_replace("^..-..-..$", "notspp") %>%
+  str_replace("^..../....$", "notspp") %>%
+  str_replace("^../../....$", "notspp") %>%
+  str_replace("pre.*$", "notspp") %>%
+  str_replace("Pre.*$", "notspp") %>%
+  str_replace("^././..$", "notspp") %>%
+  str_replace("Jan", "01") %>%
+  str_replace("Feb", "02") %>%
+  str_replace("Mar", "03") %>%
+  str_replace("Apr", "04") %>%
+  str_replace("May", "05") %>%
+  str_replace("Jun", "06") %>%
+  str_replace("Jul", "07") %>%
+  str_replace("Aug", "08") %>%
+  str_replace("Sep", "09") %>%
+  str_replace("Oct", "10") %>%
+  str_replace("Nov", "11") %>%
+  str_replace("Dec", "12") %>%
+  na_if("notspp")
+
+sampdate_dateUsable2 <- sampdate_dateUsable1 %>%
+  filter(!is.na(new_Date))
+
+rm(sampdate_dateUsable1)
+
+sampdate_dateUsable2$year <- sampdate_dateUsable2$new_Date %>%
+  str_replace("^..-..-","") %>%
+  str_replace("-..-..$","") %>%
+  str_replace("^..-.. ", "") %>%
+  str_replace("^..-", "") %>%
+  str_replace("-..$", "")
+```
+
+```{r add good dates to all86k}
+all86k <- left_join(all86k, sampdate_dateUsable2)
+rm(sampdate_dateUsable2)
+
+all86k$prepost <- with(all86k,ifelse(as.numeric(all86k$year) < 1995, "pre", "post"))
+```
+
+Load in the contigs that have pt181
+```{r}
+contiglist <- read_csv("20241209-contiglist.csv", 
+    col_names = FALSE)
+
+contiglist <- contiglist %>%
+  rename("sample" = X1,
+         "pT181contigSA" = X2)
+
+# add contig list for pT181 to all86k df
+all86k <- left_join(all86k, contiglist, by = "sample")
+```
+
+```{r checking date stats}
+all86k %>%
+  filter(!is.na(year)) %>%
+  distinct(sample) # 42,522 genomes are dated
+
+all86k$year %>%
+  as.numeric() %>%
+  summary() # earliest = 1884, latest = 2022
+
+all86k$prepost %>%
+  table()
+```
+
+## over strains & over time
+
+
+# Mutation analysis
+
+## snippy output
+
+Load snp position data
+```{r load snippy output}
+# from stragglers
+# run on 86 stragglers = any that had pT181 (incl. undated + not rank-checked)
+stragglersnps <- read_table("allstragglersnps.tab")
+stragglersnps$isSA <- T
+
+# from original set
+# everything with hits covering over 4400bp
+snps <- read_delim("allsnps.tsv", 
+                      delim = "\t", escape_double = FALSE, 
+                      trim_ws = TRUE)
+snps$isSA <- T
+
+# from non-SA which exceeded hit length requirements
+nonSAsnps <- read_table("nonSA63sampsnps.tab")
+nonSAsnps$isSA <- F
+
+```
+
+Make one big df
+```{r combine mut info}
+df1 <- full_join(nonSAsnps, stragglersnps)
+df2 <- full_join(df1, snps) %>%
+  select(SAMPLE, POS, TYPE, REF, ALT, isSA)
+df2$Experiment <- df2$SAMPLE %>%
+  str_remove("-cont.*.$")
+```
+
+
+### binning identical samples
+```{r}
+js <- left_join(set2.5backup, df2, by = c("sample" = "Experiment")) %>%
+  select(sample, strain, PCN, year, issinglecopy, prepost, POS:ALT)
+js$allele <- paste0(js$POS, "-", js$TYPE, "-", js$REF, "-", js$ALT)
+
+jss <- js %>%
+  group_by(sample, PCN) %>%
+  summarise(plasAllele = paste(allele, collapse = "-"), .groups = "drop") 
+
+jss %>%
+  select(plasAllele) %>%
+  distinct() # 229 unique plasmid sequences
+```
+
+```{r Fig. 8: plotting alleles x PCN}
+left_join(jss, js) %>%
+  select(sample, PCN, strain, plasAllele, year, prepost) %>%
+  distinct() %>%
+  group_by(plasAllele) %>%
+  mutate(count = n()) %>%
+  ungroup() %>%
+  filter(count > 2) %>%
+  filter(PCN > 2) %>%
+  filter(prepost == "pre") %>%
+  ggplot(aes(x = plasAllele, y = PCN, color = strain)) +
+  #geom_violin() +
+  geom_point() +
+  scale_y_sqrt()
+
+# there's not just one allele in the early samples generating the high PCN
+
+### fig. 8 plot
+left_join(jss, js) %>%
+  select(sample, PCN, strain, plasAllele, year, prepost) %>%
+  distinct() %>%
+  group_by(plasAllele) %>%
+  mutate(count = n()) %>%
+  ungroup() %>%
+  filter(count > 2) %>%
+  filter(PCN > 2) %>%
+  ggplot(aes(x = forcats::fct_reorder(plasAllele, PCN, .fun = median), y = PCN, color = strain)) +
+  geom_point() +
+  scale_y_sqrt() +
+  theme_bw() +
+  theme(axis.text.x = element_blank(),
+  axis.ticks = element_blank()) +
+  scale_color_manual(values = allele.pallete) +
+  xlab("Plasmid Allele")
+
+left_join(jss, js) %>%
+  select(sample, PCN, strain, plasAllele, year, prepost) %>%
+  distinct() %>%
+  group_by(plasAllele) %>%
+  mutate(count = n()) %>%
+  ungroup() %>%
+  filter(count > 2) %>%
+  filter(PCN > 2) %>%
+  select(strain) %>%
+  unique()
+
+# 18 strains -- did not bin for "Other"
+# make "otherless + no 27" palette
+```
+
+```{r identical plasmids: single & multicopy}
+left_join(jss, js) %>%
+  select(sample, PCN, plasAllele, issinglecopy) %>%
+  distinct() %>%
+  ggplot(aes(x = plasAllele, fill = issinglecopy)) +
+  geom_bar(position = "stack") +
+  scale_y_sqrt()
+```
+There are identical plasmids that are both single and multicopy
+
+are there mutations uniue to SA/nonSA isolates?
+```{r SA exclusive?}
+# S. aureus exclusive, occuring more than once
+df2 %>%
+  filter(SAMPLE !="AY672108.1" & # filtering out the cloning vectors
+          SAMPLE !="JX893516.1") %>%
+  group_by(POS, TYPE, ALT, isSA) %>%
+  mutate(count = n()) %>%
+  distinct(POS, TYPE, ALT, isSA, count) %>%
+  pivot_wider(names_from = isSA,
+              values_from = count) %>%
+  filter(is.na(`FALSE`)) %>%
+  filter(`TRUE` >= 2) %>%
+  ggplot(aes(x = as.numeric(POS), fill = TYPE)) +
+  geom_histogram()
+
+# non-S. aureus exclusive, occuring more than once
+df2 %>%
+  filter(SAMPLE !="AY672108.1" & # filtering out the cloning vectors
+          SAMPLE !="JX893516.1") %>%
+  group_by(POS, TYPE, ALT, isSA) %>%
+  mutate(count = n()) %>%
+  distinct(POS, TYPE, ALT, isSA, count) %>%
+  pivot_wider(names_from = isSA,
+              values_from = count) %>%
+  filter(is.na(`TRUE`)) %>%
+  filter(`FALSE` >= 2) %>%
+  ggplot(aes(x = as.numeric(POS), fill = TYPE)) +
+  geom_histogram()
+```
+
+```{r}
+df2 %>%
+  filter(isSA == F) %>% # nonSA only
+  filter(SAMPLE !="AY672108.1" & # filtering out the cloning vectors
+          SAMPLE !="JX893516.1") %>%
+  filter(POS <= 794 | # filtering for CDS only
+           POS >= 4323 |
+           (POS >= 862 & POS <= 912) |
+           (POS >= 956 & POS <= 2335) |
+           (POS >= 2521 & POS <= 3762) |
+           (POS >= 3948 & POS <= 4049)) %>%
+  filter(TYPE == "snp")
+```
+
+
+
+```{r prepping to filter 4190 spike to create ref plot}
+POS <- 4190
+TYPE <- "snp"
+REF <- "G"
+ALT <- "T"
+
+dfForAntijoin <- data.frame(POS = POS, TYPE = TYPE, REF = REF, ALT = ALT)
+```
+
+```{r df relative to consensus}
+df2 %>%
+  filter(SAMPLE !="AY672108.1" & # filtering out the cloning vectors
+          SAMPLE !="JX893516.1") %>%
+  filter(POS == 4190 & ALT == "T" & TYPE == "snp") %>% # 7,706 rows have this allele
+  select(POS, ALT, TYPE) %>%
+  table()
+
+dfA <- anti_join(df2, dfForAntijoin, by = c("POS", "TYPE", "REF", "ALT")) %>%
+  filter(SAMPLE !="AY672108.1" & # filtering out the cloning vectors
+          SAMPLE !="JX893516.1") #20,505 rows -- correct
+
+# 7,988 - 7,706 = 282
+dfA4190 <- data.frame(
+  SAMPLE = rep("sampleX", 282),
+  POS = rep(4190, 282),
+  TYPE = rep("snp", 282),
+  REF = rep("G", 282),
+  ALT = rep("G", 282)
+)
+
+presplot <- full_join(dfA, dfA4190)
+```
+
+```{r quick math}
+df2 %>%
+  filter(SAMPLE !="AY672108.1" & # filtering out the cloning vectors
+          SAMPLE !="JX893516.1") #28,211 rows
+
+28211 - 20505
+```
+
+```{r snippy plot}
+# this is relative to consensus
+presplot %>%
+  ggplot(aes(x = as.numeric(POS), fill = TYPE)) +
+  geom_histogram(binwidth = 10) +
+  scale_fill_manual(values = c25) +
+  theme_bw() +
+  labs(x = "Plasmid position")
+```
+
+```{r missing anything in presplot at high frequency?}
+presplot %>%
+  select(POS, TYPE, ALT) %>%
+  group_by(POS, TYPE, ALT) %>%
+  mutate(count = n()) %>%
+  distinct() %>%
+  filter(count > 3000)
+
+presplot %>%
+  select(POS, TYPE, ALT) %>%
+  group_by(POS, TYPE, ALT) %>%
+  mutate(count = n()) %>%
+  distinct() %>%
+  filter(POS == 2464)
+```
+
+
+```{r plotting mutations}
+# mutation frequency relative to edited
+# df2 is relative to reference, had to edit to deal with spike at 4190
+presplot %>%
+  ggplot(aes(x = as.numeric(POS), fill = TYPE)) +
+  geom_histogram(binwidth = 1)
+
+# allele count
+df2 %>%
+  filter(SAMPLE !="AY672108.1" & # filtering out the cloning vectors
+          SAMPLE !="JX893516.1") %>% 
+  group_by(POS) %>% 
+  summarise(NumberOfVar = n_distinct(TYPE, ALT)) %>%
+  ggplot(aes(x = as.numeric(POS), y = NumberOfVar)) +
+  geom_col()
+```
+
+that spike in pre also might be high freq
+let's check on it
+```{r checking pre spike}
+presplot %>%
+  filter(POS > 2200 & POS < 2500) %>%
+  filter(TYPE == "complex") %>%
+  select(POS, ALT) %>%
+  table()
+
+3064 / 7988
+```
+Highest freq mut is in 3064 samples
+Still not the majority of samples!
+
+```{r alleles plot}
+df3 <- df2 %>% 
+  group_by(POS) %>% 
+  summarise(NumberOfVar = n_distinct(ALT))
+
+df3 %>%
+  mutate(Alleles = NumberOfVar + 1) %>%
+  ggplot(aes(x = POS, y = Alleles)) +
+  geom_col(width = 1) +
+  xlab("Plasmid position") +
+  theme_bw()
+```
+
+```{r combining Fig. 2A & B}
+df2 %>%
+  select(POS, TYPE, ALT) %>% # for all samples with mut, what is allele & type at each site?
+  distinct() %>% # distinct mutations (we don't need to know sample count) -- 680 rows
+  group_by(POS, TYPE) %>%
+  mutate(countPT = n()) %>% # @ all sites how many different mutations of each type?
+  select(-ALT) %>% # don't count alts, we know how many now
+  distinct() %>% 
+  ggplot(aes(x = as.numeric(POS), y = countPT, #color = TYPE, 
+             fill = TYPE)) +
+  geom_col(width = 10,
+           position = "stack") +
+  #geom_bar(width = 1) +
+  theme_bw() +
+  labs(y = "# Alt Alleles",
+       x = "Plasmid Position",
+       fill = "Mutation type")
+
+# think about how we want to represent this / the axes. what is this?
+# need to learn or establish the binwidth / width for these!!!!
+```
+
+```{r Fig. 2 with 10bp binwidth}
+df2 %>%
+  select(POS, TYPE, ALT) %>% # for all samples with mut, what is allele & type at each site?
+  distinct() %>% # distinct mutations (we don't need to know sample count) -- 680 rows
+  mutate(POSn = str_replace(POS, "\\d(?=\\D*$)", "0"))%>%
+  select(POSn, TYPE, ALT) %>%
+  group_by(POSn, TYPE) %>%
+  mutate(countTYPEPOSn = n()) %>%
+  distinct() %>%
+  ggplot(aes(x = as.numeric(POSn), #y = countPT, #color = TYPE, 
+             fill = TYPE)) +
+  geom_bar(position = "stack") +
+  theme_bw() +
+  labs(y = "# Alt Alleles",
+       x = "Plasmid Position (10bp binwidth)",
+       fill = "Mutation type")
+```
+ALSO need a plot with the genes
+
+
+
+Let's look at the gene plot
+```{r Fig. 2 gene plot}
+baktaRef1 <- data.frame(
+  Type = c("cds", "sorf", "cds", "cds", "oriC", "cds", "ncRNA", "cds"),
+  Start = c(0, 862, 956, 2521, 3763, 3948, 4100, 4289),
+  Stop = c(794, 912, 2335, 3762, 4288, 4049, 4194, 4439)
+)
+
+baktaRef2 <- data.frame(
+  Type = c("repC", "sorf", "tetK", "pre", "oriC", "cds", "ncRNA", "repC"),
+  Start = c(0, 862, 956, 2521, 3763, 3948, 4100, 4289),
+  Stop = c(794, 912, 2335, 3762, 4288, 4049, 4194, 4439)
+)
+
+baktaRef2$length <- baktaRef2$Stop - baktaRef2$Start
+
+geneplot <- ggplot(baktaRef2, aes(xmin = Start, xmax = Stop, y = "pT181",
+                                 fill = Type)) +
+  geom_gene_arrow() +
+  #geom_gene_label() +
+  #facet_wrap(~ molecule, scales = "free", ncol = 1) +
+  scale_fill_brewer(palette = "Set3") +
+  theme(legend.position="none")
+
+geneplot + theme_bw()
+```
+
+## checking on 1954 isolate (& others)
+
+Does the 1954 isolate have core SNPs (relative to reference plasmid)?
+```{r}
+left_join(set2.5backup, df2, by = c("sample" = "Experiment")) %>%
+  filter(as.numeric(year) < 1960) %>% # just SRX864932 from 1954
+  filter(POS <= 794 | # filtering for CDS only
+           POS >= 4323 |
+           (POS >= 862 & POS <= 912) |
+           (POS >= 956 & POS <= 2335) |
+           (POS >= 2521 & POS <= 3762) |
+           (POS >= 3948 & POS <= 4049))
+```
+1954 isolate has NO CDS snps relative to reference
+
+
+## CDS mutations reworked
+
+We now know that there are significant insertions/deletions occurring in the plasmid, even in coding regions!
+
+We need to revisit the output to estimate a mutation rate, or more accurately, snp accumulation rate in coding regions (CDS)
+
+```{r making snp datasets}
+snpSet <- left_join(set2.5backup, df2, by = c("sample" = "Experiment")) %>% 
+  # no need to filter cloning vectors since we are just going with HQ SA samples
+  filter(POS <= 794 | # filtering for CDS only
+           POS >= 4323 |
+           (POS >= 862 & POS <= 912) |
+           (POS >= 956 & POS <= 2335) |
+           (POS >= 2521 & POS <= 3762) |
+           (POS >= 3948 & POS <= 4049)) %>%
+  filter(TYPE == "snp") %>% # filtering for SNPs only
+  group_by(sample) %>%
+  mutate(SNPcount = n()) %>%
+  select(sample, SNPcount)
+
+cdsSNP <- left_join(set2.5backup, snpSet) %>%
+  replace_na(list(SNPcount = 0)) %>%
+  select(sample, year, SNPcount, PCN, issinglecopy, strain, type) %>%
+  distinct()
+```
+
+Recreating figures using new metrics (SNPs, instead of all mutation types)
+```{r Fig. 3: snp figs}
+ggplot(data = cdsSNP, aes(x = as.numeric(year), y = SNPcount)) +
+  #geom_point() +
+  geom_jitter(width = 0.3, height = 0.05) +
+  geom_smooth(method = "lm", se = TRUE) +
+  theme_bw() +
+  labs(x = "Year of Collection",
+       y = "CDS SNP count")
+
+cdsSNP$SNPcountFct <- factor(cdsSNP$SNPcount, levels=c('4', '3', '2', '1', '0'))
+
+cdsSNP %>%
+  mutate(decade = str_replace(year, ".$", "0s")) %>%
+  filter(year > 1954) %>%
+  ggplot(aes(x = decade, fill = SNPcountFct)) +
+  geom_bar(position = "fill") +
+  labs(x = "Decade",
+       y = "Proportion of Samples",
+       fill = "Coding region\nSNP count") +
+  theme_bw() +
+  scale_fill_manual(values = c25)
+```
+
+### how many sites have more than 1 allele (aka any snippy output)?
+```{r}
+df2 %>%
+  filter(SAMPLE !="AY672108.1" & # filtering out the cloning vectors
+          SAMPLE !="JX893516.1") %>%
+  select(POS) %>%
+  distinct()
+# 519 sites have a mutation
+
+df2 %>%
+  filter(SAMPLE !="AY672108.1" &
+          SAMPLE !="JX893516.1") %>%
+  select(ALT, TYPE, POS) %>%
+  distinct()
+# 664 different mutations happen across the plasmid
+```
+
+```{r}
+df2 %>%
+  filter(SAMPLE !="AY672108.1" &
+          SAMPLE !="JX893516.1") %>%
+  select(ALT, TYPE, POS) %>%
+  group_by(ALT, TYPE, POS) %>%
+  mutate(occurance = n()) %>%
+  distinct() %>% # 664 -- good
+  arrange(desc(occurance))
+  #ggplot(aes(x = occurance)) +
+  #geom_point()
+```
+Remember -- 4190 snp T at a really high freq, actually more common allele
+
+<5% of samples == <400 isolates
+```{r}
+df2 %>%
+  filter(SAMPLE !="AY672108.1" &
+          SAMPLE !="JX893516.1") %>%
+  select(ALT, TYPE, POS) %>%
+  group_by(ALT, TYPE, POS) %>%
+  mutate(occurance = n()) %>%
+  distinct() %>%
+  filter(occurance < 400) #  655 rows # add 1 for the 4190 position -> 656
+```
+
+
+##### reflection on CDS mutations vs SNPs
+The reference plasmid which we mapped to is 4439 bp long
+this is actually just a little short - I expect especially to see insertions, but I suppose deletions are possible
+
+just want to check what kind of stuff is happening in the CDS
+```{r cds mut table for 2.5k set}
+left_join(set2.5backup, df2, by = c("sample" = "Experiment")) %>%
+  filter(POS <= 794 | 
+           POS >= 4323 |
+           (POS >= 862 & POS <= 912) |
+           (POS >= 956 & POS <= 2335) |
+           (POS >= 2521 & POS <= 3762) |
+           (POS >= 3948 & POS <= 4049)) %>%
+  select(TYPE) %>%
+  table()
+```
+
+
+
+##### Mutation accumulation -- look at other species
+```{r nonSA mutations in CDS}
+df2 %>%
+  filter(isSA == F) %>%
+  #distinct(SAMPLE) %>% # 60 non SA samples here (that have mut) (at this point - check for cloning vectors)
+  filter(POS <= 794 | 
+           POS >= 4323 |
+           (POS >= 862 & POS <= 912) |
+           (POS >= 956 & POS <= 2335) |
+           (POS >= 2521 & POS <= 3762) |
+           (POS >= 3948 & POS <= 4049)) %>%
+  #distinct(SAMPLE) # 23 rows: most nonSA are identical in CDS to SA pT181
+  group_by(SAMPLE) %>%
+  mutate(mutcount = n()) %>%
+  select(SAMPLE, mutcount) %>%
+  distinct() 
+  
+ # ggplot(aes(x = POS, fill = ALT)) +
+  #geom_histogram() +
+  #theme(legend.position="none")
+df2 %>%
+  filter(isSA == F) %>%
+  filter(SAMPLE == "CP128253.1") %>%
+  filter(POS <= 794 | 
+           POS >= 4323 |
+           (POS >= 862 & POS <= 912) |
+           (POS >= 956 & POS <= 2335) |
+           (POS >= 2521 & POS <= 3762) |
+           (POS >= 3948 & POS <= 4049))
+```
+CP128253.1 - mutcount 12 - Staphylococcus pseudintermedius strain 20VMG1536 chromosome
+This is the only non-cloning vector that is farther than the SA
+
+AY672108.1 & JX893516.1 are cloning vectors
+
+CP092479.1 - mutcount 4 - Staphylococcus haemolyticus strain CGMH-SH51 plasmid unnamed, complete sequence, Staphylococcus haemolyticus,7633,7901,100%,0.0,99.44,33938,
+4 is still within the SA set
+Everthing else is <=3
+
+are there snps uniue to SA/nonSA isolates?
+```{r exclusive snps?}
+# S. aureus exclusive, occuring more than once
+df2 %>%
+  filter(SAMPLE !="AY672108.1" & # filtering out the cloning vectors
+          SAMPLE !="JX893516.1") %>%
+  group_by(POS, TYPE, ALT, isSA) %>%
+  mutate(count = n()) %>%
+  distinct(POS, TYPE, ALT, isSA, count) %>%
+  pivot_wider(names_from = isSA,
+              values_from = count) %>%
+  filter(is.na(`FALSE`)) %>%
+  filter(`TRUE` >= 2) #%>%
+  #ggplot(aes(x = as.numeric(POS), fill = TYPE)) +
+  #geom_histogram()
+
+# non-S. aureus exclusive, occuring more than once
+df2 %>%
+  filter(SAMPLE !="AY672108.1" & # filtering out the cloning vectors
+          SAMPLE !="JX893516.1") %>%
+  group_by(POS, TYPE, ALT, isSA) %>%
+  mutate(count = n()) %>%
+  distinct(POS, TYPE, ALT, isSA, count) %>%
+  pivot_wider(names_from = isSA,
+              values_from = count) %>%
+  filter(is.na(`TRUE`)) %>%
+  filter(`FALSE` >= 2)# %>%
+  #ggplot(aes(x = as.numeric(POS), fill = TYPE)) +
+  #geom_histogram()
+```
+There are mutations which are "private" to SA/non-SA --- most of them are private to SA, which makes sense given the composition of the dataset
+in Non-sa samples, there is 1 snp in 2 isolates and 1 complex mut in 3 isolates
+
+```{r}
+df2 %>%
+  filter(SAMPLE !="AY672108.1" & # filtering out the cloning vectors
+          SAMPLE !="JX893516.1") %>%
+  filter(POS == 1943 | POS == 3359)
+```
+All different experiments for the snp/complex mutation havers
+
+
+### back to the regressions on snps
+Let's rerun the regressions for strains, time, etc
+```{r snp regression}
+#glm(SNPcount ~ as.numeric(year) + as.factor(strain),
+ #   data = cdsSNP, family = poisson) %>%
+  #summary()
+
+lm(SNPcount ~ as.numeric(year),
+   data = cdsSNP) %>%
+  summary()
+```
+Date of collection has a significant impact on SNPs accumulated in CDS
+
+```{r size of cds}
+cdslen <- (4439 - 4323) + (4049 - 3948) + (3762 - 2521) + (2335 - 956) + (912 - 862) + (794)
+```
+
+```{r}
+# 0.004234 cds snps / year in pT181
+0.004234 / 3681
+```
+1.150231e-06 snps/bp/year --> 1.15 SNP/Mbp/year 
+this is on the lower end compared to other estimates, but nothing too out-there
+
+
+Now that we are looking at just the SNPs, more strains jump out as having different amounts!
+Let's plot, looking at strain, SC vs not, etc
+
+```{r}
+cdsSNP %>%
+  ggplot(aes(x = as.numeric(year), y = SNPcount, color = issinglecopy)) +
+  geom_point() +
+  facet_wrap(~strain)
+```
+To make it easier, just look at strains with at least 10 plasmids
+
+```{r}
+cdsSNP %>%
+  group_by(strain) %>%
+  mutate(strainCount = n()) %>%
+  filter(strainCount >= 10) %>%
+  ggplot(aes(x = as.numeric(year), y = SNPcount, color = issinglecopy)) +
+  geom_point() +
+  facet_wrap(~strain)
+```
+
+now re-do the regressions with the 10+ plasmids strains
+
+Can't pipe to glm :(
+Make a new df
+
+```{r}
+strainCountMin10 <- cdsSNP %>%
+  group_by(strain) %>%
+  mutate(strainCount = n()) %>%
+  filter(strainCount >= 10)
+
+glm(SNPcount ~ as.numeric(year) + as.factor(strain),
+    data = strainCountMin10,
+    family = poisson) %>%
+  summary()
+
+lm(SNPcount ~ as.numeric(year),
+   data = strainCountMin10) %>%
+  summary()
+```
+Okay, looks like strain does really have an effect on snps accumulated....
+
+Hmmmmmmmmmmmm maybe look at where these are happening? Where are they localized?
+
+Of course, within a strain especially they are not independent
+
+```{r plotting cds snps by strain}
+left_join(set2.5backup, df2, by = c("sample" = "Experiment")) %>%
+  filter(TYPE == "snp") %>%
+  filter(POS <= 794 | # filtering for CDS only
+           POS >= 4323 |
+           (POS >= 862 & POS <= 912) |
+           (POS >= 956 & POS <= 2335) |
+           (POS >= 2521 & POS <= 3762) |
+           (POS >= 3948 & POS <= 4049)) %>% 
+  ggplot(aes(x = POS, fill = ALT)) +
+  geom_histogram() +
+  facet_wrap(~strain, scales = "free")
+```
+
+Would be tough to actually cluster plasmids by CDS snps -- there is 1 main genotype across all samples
+
+
+
+# Plasmid copy number (PCN) calculations
+loading in stuff that has been averaged across contig for all strains
+```{r load depths and gene positions}
+# avg depth for each contig for non-straggler samples
+avgdepths <- read_table2("20231222/cleaned_avgdepths.txt", col_names = FALSE)
+avgdepths <- avgdepths %>% rename("Experiment" = "X1", "contig" = "X2",
+                                  "avgDepth" = "X3")
+
+#straggler depths here
+stragglercleaned <- read_table2("straggler.cleaned.avgdepth", 
+    col_names = FALSE)
+stragglercleaned <- stragglercleaned %>% rename("Experiment" = "X1", "contig" = "X2",
+                                  "avgDepth" = "X3")
+
+#lawful+tetK contigs
+#tetK = g00000
+geneID <- read_table2("20231222/geneID-forR.txt", 
+    col_names = FALSE)
+geneID <- geneID %>% rename("gene" = "X1", "Experiment" = "X2",
+                            "contig" = "X3")
+
+#straggler IDs here
+stragger_lawfulpos <- read_table2("stragger.lawfulpos.tsv", 
+    col_names = FALSE)
+stragger_lawfulpos <- stragger_lawfulpos %>% rename("gene" = "X1",
+                                                    "Experiment" = "X2",
+                                                    "contig" = "X3")
+```
+
+report join to get the gold
+```{r get the gold}
+avgdepthsgold <- left_join(avgdepths, staphopia_v2_all_report,
+                       by = c("Experiment" = "sample")) %>%
+  select(Experiment, contig, avgDepth, rank, mlst_blast_st:mlst_ariba_yqil) %>%
+  filter(rank == "gold")
+
+stragglercleanedgold <- left_join(stragglercleaned, staphopia_v2_all_report,
+                       by = c("Experiment" = "sample")) %>%
+  select(Experiment, contig, avgDepth, rank, mlst_blast_st:mlst_ariba_yqil) %>%
+  filter(rank == "gold")
+```
+
+adding gene position info
+```{r add gene location}
+geneID$loc <- with(geneID, ifelse(gene=="g00000", 'pT181', 'chrom'))
+stragger_lawfulpos$loc <- with(stragger_lawfulpos,
+                               ifelse(gene=="g00000", 'pT181', 'chrom'))
+```
+
+put the depths together
+```{r combine depths}
+regdepths <- left_join(avgdepthsgold, geneID,
+                        by = c("Experiment", "contig")) %>%
+  select(-gene) %>%
+  distinct()
+
+strdepths <- left_join(stragglercleanedgold, stragger_lawfulpos,
+                        by = c("Experiment", "contig")) %>%
+  select(-gene) %>%
+  distinct()
+
+alldepths1 <- full_join(regdepths, strdepths)
+```
+
+
+Calculating plasmid copy number (PCN) from relative read depth
+```{r calculate PCN}
+# get avg for each location for each sample
+ratio1 <- alldepths1 %>% 
+  group_by(Experiment, loc) %>% 
+  summarise(meandepth = mean(avgDepth))
+
+untidy1 <- pivot_wider(ratio1, names_from = loc,
+                      values_from = meandepth)
+
+# adding ratio of plasmid to chromosome
+untidy1$PCN <- (untidy1$pT181 / untidy1$chrom)
+
+summary(untidy1$PCN)
+```
+
+```{r visualize PCN & get nonNA df}
+# all PCN
+pcnA <- ggplot(data = untidy1, mapping = aes(x = PCN)) +
+  geom_histogram(binwidth = 1) +
+  theme_bw()
+
+pcn.notNA1 <- untidy1 %>%
+  filter(!is.na(PCN))
+
+# NAs are due to no good-enough blast hit for pT181
+# due to straggler filtering -- filtering is happening now
+
+mean(pcn.notNA1$PCN)
+median(pcn.notNA1$PCN)
+sd(pcn.notNA1$PCN)
+summary(pcn.notNA1$PCN)
+
+# PCN =< 50
+pcnB <- pcn.notNA1 %>%
+  filter(PCN <= 50) %>%
+  ggplot(mapping = aes(x = PCN)) +
+  geom_histogram(binwidth = 0.1) +
+  theme_bw()
+
+# PCN =< 3
+pcnC <- pcn.notNA1 %>%
+  filter(PCN <= 3) %>%
+  ggplot(mapping = aes(x = PCN)) +
+  geom_histogram(binwidth = 0.01) +
+  theme_bw()
+
+cowplot::plot_grid(pcnA, pcnB, pcnC, ncol = 3)
+```
+
+```{r Fig. 4 reworking pcn visualization}
+# all PCN
+pcnAb <- ggplot(data = pcn.notNA1, mapping = aes(x = PCN)) +
+  geom_histogram(binwidth = 1) +
+  theme_bw() +
+  scale_x_sqrt()
+
+# PCN =< 3
+pcnCb <- pcn.notNA1 %>%
+  filter(PCN <= 3) %>%
+  ggplot(mapping = aes(x = PCN)) +
+  geom_histogram(binwidth = 0.01) +
+  theme_bw()
+
+cowplot::plot_grid(pcnAb, pcnCb, ncol = 2)
+```
+
+get non-single copy stats
+```{r MC stats}
+pcn.notNA1 %>%
+  filter(PCN > 2) %>%
+  summary()
+```
+
+Add PCN information to all86k
+```{r all86k <- + PCN}
+all86k <- left_join(all86k, pcn.notNA1, by = c("sample" = "Experiment")) 
+```
+
+This is the set2.5, with 2,460 isolates
+```{r checking on set2.5}
+all86k %>%
+  filter(!is.na(mecA)) %>% # is def SA & we have sccmec
+  filter(!is.na(PCN)) %>% # gold, SA, and has pt181
+  filter(!is.na(year)) %>% # valid date, is SA
+  filter(!is.na(CC)) %>% # have a CC
+  filter(!is.na(strain)) %>% # assigned strain
+  select(-Run, -`Sample Name`, -Sample_name, -Bytes, -create_date, -Bases,
+         -version, -ReleaseDate, -AvgSpotLen, -`DATASTORE filetype`) %>%
+  distinct()
+```
+
+singlecopiness
+```{r singlecopiness}
+all86k$issinglecopy <-  with(all86k, ifelse(PCN < 2, T, F))
+```
+
+```{r set2.5 making, for use & backup}
+set2.5 <- all86k %>%
+  filter(!is.na(mecA)) %>% # is def SA & we have sccmec
+  filter(!is.na(PCN)) %>% # gold, SA, and has pt181
+  filter(!is.na(year)) %>% # valid date, is SA
+  filter(!is.na(CC)) %>% # have a CC
+  filter(!is.na(strain)) %>%
+  select(-Run, -`Sample Name`, -Sample_name, -Bytes, -create_date, -Bases,
+         -version, -ReleaseDate, -AvgSpotLen, -`DATASTORE filetype`) %>%
+  distinct()
+```
+
+## calculating depth for non-gold integrated isolates (n = 9)
+locating the samples
+```{r locate in df}
+avgdepths %>%
+  filter(Experiment == "SRX7671590" |
+           Experiment == "SRX10154032" | 
+           Experiment == "ERX458901" |
+           Experiment == "ERX3560180" |
+           Experiment == "SRX886929" |
+           Experiment == "SRX4814892" |
+           Experiment == "ERX2285900" |
+           Experiment == "ERX2285874" |
+           Experiment == "ERX1834600") %>%
+  distinct(Experiment) # they are all in "avgdepths" (no stragglers)
+```
+
+get the depths for the chrom, pT181, & NA contigs for non-gold integrated isolates
+```{r df with depths & positions}
+ngId <- left_join(avgdepths, geneID,
+                        by = c("Experiment", "contig")) %>%
+  filter(Experiment == "SRX7671590" |
+           Experiment == "SRX10154032" | 
+           Experiment == "ERX458901" |
+           Experiment == "ERX3560180" |
+           Experiment == "SRX886929" |
+           Experiment == "SRX4814892" |
+           Experiment == "ERX2285900" |
+           Experiment == "ERX2285874" |
+           Experiment == "ERX1834600") %>%
+  select(-gene) %>%
+  distinct()
+```
+
+```{r calculate PCN}
+# get avg for each location for each sample
+ratioNGi <- ngId %>% 
+  group_by(Experiment, loc) %>% 
+  summarise(meandepth = mean(avgDepth))
+
+untidyNGi <- pivot_wider(ratioNGi, names_from = loc,
+                      values_from = meandepth)
+
+# adding ratio of plasmid to chromosome
+untidyNGi$PCN <- (untidyNGi$pT181 / untidyNGi$chrom)
+
+untidyNGi
+```
+PCN is solid estimator, even for non-gold isolates!!!
+range 1.01 - 1.39
+
+
+# PCN in set2.5
+```{r pcn histogram}
+set2.5 %>%
+  filter(PCN > 2) %>%
+  ggplot(aes(x = PCN)) +
+  geom_histogram()
+```
+
+
+```{r pcn stats}
+set2.5backup %>%
+  filter(PCN > 2) %>%
+  select(PCN) %>%
+  summary()
+
+x1 <- set2.5backup %>%
+  filter(PCN > 2) %>%
+  select(PCN)
+
+quantile(x1$PCN,
+         probs=c(0.025,0.975))
+
+IQR(x1$PCN)
+```
+
+```{r recent MC pT181}
+set2.5 %>%
+  filter(as.numeric(year) >= 1995) %>%
+  filter(PCN > 2) %>%
+  mutate(top9strain = fct_lump_n(strain,9)) %>%
+  filter(top9strain != "Other") %>%
+  ggplot(aes(x = as.numeric(year), y = PCN)) +
+  geom_point() +
+  facet_wrap(~top9strain, ncol = 3) +
+  labs(title = "multicopy PCN by strain (top 9)") +
+  theme_bw()
+```
+
+# Singlecopiness by strain
+```{r chi square - sc x strain}
+set2.5Schi <- set2.5 %>%
+  group_by(strain, issinglecopy) %>%
+  mutate(total = n()) %>%
+  select(strain, issinglecopy, total) %>%
+  distinct() %>%
+  pivot_wider(id_cols = strain,
+              names_from = issinglecopy,
+              values_from = total) %>%
+  mutate_all(~replace(.,is.na(.),0))
+
+Ms <- as.table(rbind(set2.5Schi$`TRUE`, set2.5Schi$`FALSE`))
+dimnames(Ms) <- list(copy = c("single", "multi"),
+                    strain = c(set2.5Schi$strain))
+
+XsqS <- chisq.test(Ms)
+
+XsqS$residuals  # Pearson residuals
+XsqS$stdres
+XsqS$p.value
+XsqS$statistic
+```
+
+```{r prevalence SC vs MC in pre & post}
+set2.5 %>%
+  group_by(prepost, issinglecopy) %>%
+  mutate(scTime = n()) %>%
+  select(prepost, issinglecopy, scTime) %>%
+  distinct()
+
+# postSC %
+1848/(1848+428)
+
+# preSC %
+15 / (15+169)
+```
+
+
+## fig. 6B
+```{r figure: sc x strain (Fig. 6B)}
+set2.5Schi %>%
+  filter(`TRUE`+`FALSE` > 1) %>%
+  mutate(ratio = `TRUE`/`FALSE`) %>%
+  left_join(., set2.5backup, by = "strain") %>%
+  ggplot(aes(x = forcats::fct_reorder(strain, ratio, .fun = median),
+         fill = issinglecopy)) +
+  geom_bar(position = "fill")  +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 90)) +
+  labs(x = "Strain",
+       y = "Proportion of Samples",
+       fill = "PCN") +
+  scale_fill_manual(values = c25,
+                    labels = c("multicopy", "single-copy"))
+```
+
+# where is the 1990s sampling gap?
+```{r}
+set2.5 %>%
+  filter(as.numeric(year) < 1998 & as.numeric(year) > 1990) %>%
+  select(sample, type, strain, year)
+
+all86k %>%
+  filter(as.numeric(year) < 1997 & as.numeric(year) > 1993) %>%
+  select(sample, type, strain, year)
+```
+No samples in set2.5k collected 1992-1996
+Also there is a composition difference before/after this gap
+staph is continuously collected still
+
+
+# PCN for type III SCCmec
+```{r type iii stats}
+set2.5backup %>%
+  filter(type == "III") %>%
+  select(PCN) %>%
+  summary()
+```
+
+```{r strain27 info}
+set2.5backup %>%
+  filter(issinglecopy == T) %>% # 1,863 rows
+  filter(strain == "S99.5_27") # 1,131 rows
+```
+
+```{r what sccmec types s27}
+set2.5backup %>%
+  filter(strain == "S99.5_27") %>%
+  select(mecA, type) %>%
+  distinct()
+```
+
+
+# Integration position
+
+## integration in complete genomes
+
+```{r}
+complot <- left_join(completeover, completeblast, by = "sseqid") %>%
+  ggplot(aes(xmin = sstart, xmax = send, y = sseqid)) +
+  geom_gene_arrow()
+
+complot
+
+#ggexport(complot, filename = "complot.pdf")
+```
+
+```{r}
+comsite <- left_join(completeover, completeblast, by = "sseqid") %>%
+  mutate(pos = ifelse(send < 4440, "maybefree", "int")) 
+
+comsite %>%
+  ggplot(aes(xmin = sstart, xmax = send, y = sseqid,
+             color = pos
+             )) +
+  geom_gene_arrow()
+
+# Complete genomes from 337 set have GCA names
+dnaA_start_coords$samplematch <- dnaA_start_coords$contig %>%
+  str_remove("GCA_.*_")
+
+dnaA_start_coords %>%
+  select(genome) %>%
+  distinct()
+
+dnaA_start_coords %>%
+  select(contig) %>%
+  distinct()
+
+comsite$samplematch <- comsite$sseqid %>%
+  str_remove("N._")
+
+left_join(dnaA_start_coords, comsite, by = "samplematch") %>%
+  filter(!is.na(sseqid)) %>%
+  select(samplematch) %>%
+  distinct() # 14 dnaA-1st complete genomes have pT181
+```
+Complete genomes from 337 set have GCA names
+There are 14 of the dnaA start genomes that are in the set with pT181
+
+
+```{r}
+inner_join(dnaA_start_coords, comsite, by = "samplematch") %>%
+  select(samplematch, length.y:pos) %>%
+  distinct() %>%
+  ggplot(aes(xmin = sstart, xmax = send, y = samplematch,
+             color = pos
+             )) +
+  geom_gene_arrow()
+```
+
+```{r}
+position14 <- inner_join(dnaA_start_coords, comsite, by = "samplematch")
+```
+
+```{r}
+geneset <- position14 %>%
+  filter(sseqid == "NZ_CP015447.2" |
+           sseqid == "NZ_CP029172.1" |
+           sseqid == "NZ_CP029685.1" |
+           sseqid == "NZ_CP022902.1" |
+           sseqid == "NZ_CP058312.1" |
+           sseqid == "NZ_LS483309.1" |
+           sseqid == "NZ_LR027874.1") %>%
+  filter(start > 44000 & start < 100000) 
+
+#geneset$mutName <- ifelse(str_detect(geneset$symbol, "MecA") == TRUE, 'mecA',
+ #                           ifelse(str_detect(geneset$symbol,
+  #                                            "tetracycline efflux MFS transporter Tet") == TRUE, "tetK",
+   #      ifelse(str_detect(geneset$symbol, "transposase") == TRUE, "transposase",
+    #            ifelse(str_detect(geneset$symbol, "replication initiation protein") == TRUE,"repC", 
+     #                  ifelse(geneset$symbol, "plasmid recombination protein") == TRUE, "pre", 
+      #                        ifelse(geneset$symbol,"recombinase") == TRUE,"recombinase", 
+       #                "other"))))
+geneset %>%
+  ggplot(aes(xmin = start, xmax = end, y = samplematch,
+             fill = symbol,
+             color = symbol
+             )) +
+  geom_gene_arrow()
+```
+
+
+# CCN: verifying that core contigs are centered at 1 & origin isn't
+
+```{r calculate chrom avg}
+# get avg for each location for each sample
+chromdepths <- alldepths1 %>%
+  filter(loc == "chrom") %>%
+  group_by(Experiment) %>% 
+  mutate(ChromAvg = mean(avgDepth))
+
+chromdepths$CCN <- chromdepths$avgDepth / chromdepths$ChromAvg
+
+chromdepths %>%
+  filter(CCN < 2) %>%
+  ggplot(aes(x = CCN)) +
+  geom_histogram()
+```
+
+So it looks like a pretty even distribution!
+
+need to go back to the genes to approximate oriC location
+Defined by co-localization of 4 genes (Lancet paper, 2001)
+- rpmH = g03298
+- dnaA = g00489
+- dnaN = g00392
+- recF = g00595
+
+```{r ID near origin}
+fo1 <- left_join(chromdepths, geneID) %>%
+  select(Experiment:avgDepth, loc:gene)
+
+fo2 <- left_join(chromdepths, stragger_lawfulpos) %>%
+  select(Experiment:avgDepth, loc:gene)
+
+findOri <- full_join(fo1, fo2)
+
+findOri$nearOri <- with(findOri, ifelse(gene == "g03298" |
+           gene == "g00489" |
+           gene == "g00392" |
+           gene == "g00595",
+           T, F))
+```
+
+I think the NAs have been generated by the join.
+
+```{r Fig. 11 chrom plot near origin vs not}
+findOri %>%
+  select(-gene) %>%
+  filter(!is.na(nearOri)) %>% #only stuff that had an identifiable gene
+  distinct() %>% # de-replicate contigs
+  filter(CCN < 3) %>% # for readability
+  ggplot(aes(x = CCN, fill = nearOri)) +
+  geom_histogram() +
+  theme_bw()
+```
+
+
+One sample t-test (data is normally distributed)
+```{r origin ttest & plot}
+contigNearOri <- findOri %>%
+  filter(nearOri ==T)
+
+t.test(contigNearOri$CCN, mu = 1)
+
+ggplot(data = contigNearOri,
+       aes(x = CCN)) +
+  geom_histogram()
+
+contigNearOri$CCN %>%
+  mean()
+
+contigNearOri$CCN %>%
+  sd()
+```
+For contigs containing/right next to origin, CCN = 1.15
+This is significant, True mean not 1 (like it is/should be for chrom overall)
+Distribution isn't actually as tight as the type III distribution is
+
+# looking at early isolates
+```{r early strain breakdown}
+# assess sampling bias
+all86k %>%
+  filter(prepost == "pre") %>% # looking at early samples
+  filter(!is.na(strain)) %>%
+  filter(!is.na(CC)) %>%
+  filter(!is.na(mecA)) %>%
+  filter(rank == "gold") %>%
+  select(sample, strain, prepost, year) %>%
+  distinct() %>% # 242 pre-1995 isolates
+  #filter(strain == "S99.5_2") # 225 strain 2
+  filter(strain != "S99.5_2") #17 not strain 2
+
+# with pT181
+all86k %>%
+  filter(prepost == "pre") %>% # looking at early samples
+  filter(!is.na(pT181contigSA)) %>%
+  filter(!is.na(strain)) %>%
+  filter(!is.na(CC)) %>%
+  filter(!is.na(mecA)) %>%
+  filter(rank == "gold") %>%
+  select(sample, strain, prepost, year) %>%
+  distinct() %>% # 242 pre-1995 isolates
+  filter(strain == "S99.5_2") # 182 strain 2
+  # filter(strain != "S99.5_2") #2 not strain 2
+```
+this is for HIGHTEST QUALITY SA samples
+
+```{r assessing early samples, all quality}
+# all isolates
+all86k %>%
+  filter(prepost == "pre") %>%
+  select(sample, year, strain, pT181contigSA) %>%
+  distinct() %>% # 494 isolates collected before 1995
+  group_by(strain) %>%
+  mutate(preIsolatesInStrain = n()) %>%
+  select(strain, preIsolatesInStrain) %>%
+  distinct() # 249 pre-1995 isolates (all quality, all pT181 p/a) are in strain 2
+
+# pT181-containing
+all86k %>%
+  filter(prepost == "pre") %>%
+  filter(!is.na(pT181contigSA)) %>%
+  select(sample, year, strain, pT181contigSA) %>%
+  distinct() %>% #241 early isolates have pT181
+  group_by(strain) %>%
+  mutate(preIsolatesInStrain = n()) %>%
+  select(strain, preIsolatesInStrain) %>%
+  distinct() # 198 pre-1995 pT181-containing isolates are in strain 2
+
+# non-s99.5_2 pT181 appears in the 80s and 90s
+all86k %>%
+  filter(prepost == "pre") %>%
+  filter(!is.na(pT181contigSA)) %>%
+  select(sample, year, strain, pT181contigSA) %>%
+  filter(strain != "S99.5_2")
+```
+
+# year of collection figure: Fig. 1
+Fig. 1, x = year of collection, y = sample count
+A: pT181 P/A
+B: pT181 isolates by strain
+
+```{r Fig. 1}
+all86k %>%
+  filter(rank == "gold") %>%
+  filter(!is.na(year)) %>%
+  filter(!is.na(type)) %>%
+  filter(!is.na(CC)) %>%
+  filter(!is.na(strain)) %>%
+  select(sample, year, pT181contigSA) %>%
+  distinct() %>% 
+  mutate(PT181presenceAbsence = ifelse(is.na(pT181contigSA), "no p1T81", "pT181+")) %>%
+  ggplot(aes(x = as.numeric(year), fill = PT181presenceAbsence)) +
+  geom_histogram() +
+  theme_bw() +
+  labs(y = "Sample count",
+       x = "Year of Collection",
+       fill = "pT181 presence/absence"
+       ) +
+  theme(axis.text = element_text(size = 13),
+        axis.title = element_text(size = 13))
+
+set2.5 %>%
+  mutate(top7strain = fct_lump_n(strain,7)) %>%
+  ggplot(aes(x = as.numeric(year), fill = top7strain)) +
+  geom_histogram() +
+  labs(y = "Sample count",
+       x = "Year of Collection",
+       fill = "Strain") +
+  theme_bw() +
+  scale_fill_manual(values = top7strain2.5) +
+  theme(axis.text = element_text(size = 13),
+        axis.title = element_text(size = 13))
+```
+
+```{r how many strains was pT181 detected in?}
+all86k %>%
+  select(sample, pT181contigSA, strain) %>%
+  filter(!is.na(pT181contigSA)) %>%
+  distinct() %>% # confirmed 7,927 rows
+  select(strain) %>%
+  distinct() #45 rows, 1 of them is an NA -> 44 strains
+```
+
+
+regression for prevalence
+```{r logit regr prevalence}
+# get data ready for regression on plasmid prevalence
+lmprev <- all86k%>%
+  filter(!is.na(year)) %>%
+  filter(rank == "gold") %>%
+  filter(!is.na(strain)) %>%
+  filter(!is.na(type)) %>%
+  filter(!is.na(CC)) %>%
+  select(sample, pT181contigSA, year) %>%
+  distinct() %>%
+  select(pT181contigSA, year) %>%
+  group_by(pT181contigSA, year) %>%
+  mutate(haspt181 = ifelse(is.na(pT181contigSA), 0, 1)) 
+
+# regression
+logit.prev <- glm(haspt181 ~ as.numeric(year), data = lmprev,
+    family = binomial(link = "logit")) 
+
+summary(logit.prev)
+```
+
+# Fig. 6A: sc x time figure
+```{r prop sc by time (Fig. 6A)}
+scatterSC <- set2.5backup %>%
+  select(sample, issinglecopy, year) %>%
+  mutate(copynumber = ifelse(issinglecopy==T, "Single-copy", "Multicopy")) %>%
+  group_by(copynumber, year) %>%
+  mutate(countCNyear = n()) %>%
+  pivot_wider(names_from = copynumber, values_from = countCNyear) %>%
+  select(-sample, -issinglecopy) %>%
+  distinct() %>%
+  summarise_each(funs(sum(., na.rm = TRUE))) %>%
+  mutate(propSC = `Single-copy`/(`Single-copy` + Multicopy)) %>%
+  ggplot(aes(x = as.numeric(year), y = propSC)) +
+  geom_point() +
+  ylim(0,1) +
+  labs(x = "Year of Collection",
+       y = "Proportion Single-copy") +
+  theme_bw() +
+  geom_smooth(method = "lm", se = F)
+
+scatterSC
+```
+
+```{r Fig. 6A reg}
+dataforproplm <- set2.5backup %>%
+  select(sample, issinglecopy, year) %>%
+  mutate(copynumber = ifelse(issinglecopy==T, "Single-copy", "Multicopy")) %>%
+  group_by(copynumber, year) %>%
+  mutate(countCNyear = n()) %>%
+  pivot_wider(names_from = copynumber, values_from = countCNyear) %>%
+  select(-sample, -issinglecopy) %>%
+  distinct() %>%
+  summarise_each(funs(sum(., na.rm = TRUE))) %>%
+  mutate(propSC = `Single-copy`/(`Single-copy` + Multicopy))
+
+lm(propSC ~ as.numeric(year), data = dataforproplm) %>%
+  summary()
+```
+
+```{r added 2025-09-15: logistic regression on SC}
+set2.5backup %>%
+  select(sample, issinglecopy, year)
+
+logit.sc <- glm(issinglecopy ~ as.numeric(year), data = set2.5backup,
+    family = binomial(link = "logit")) 
+
+summary(logit.sc)
+```
+
+Check - how many isolates were collected before 1950?
+```{r pre-1950}
+all86k %>%
+  filter(year < 1950) %>%
+  select(sample, strain, year)
+```
+8 isolates before 1950
+strain breakdown: 3 NA, 3 S21, 1 S5, 1 S15
+
+
+# Thresholding: why >= 4400bp for present
+
+```{r Fig. 9 understanding blast hit distribution}
+summary(totallength)
+
+totallength %>%
+  ggplot(mapping = aes(x = length)) + 
+  geom_histogram(binwidth = 100) +
+  xlab("sum of blast hit length") +
+  theme_bw()
+
+totallength %>%
+  filter(length >= 3500 & length <= 4800) %>%
+  ggplot(mapping = aes(x = length)) + 
+  geom_histogram(binwidth = 100) + 
+  scale_x_continuous(
+    breaks = c(3500,3600,3700,3800,3900,4000,4100,4200,
+               4300,4400,4500,4600,4700,4800),
+    labels = c(3500,3600,3700,3800,3900,4000,4100,4200,
+               4300,4400,4500,4600,4700,4800))
+
+totallength %>%
+  filter(length >= 4200 & length <= 4600) %>%
+  ggplot(mapping = aes(x = length)) + 
+  geom_histogram(bins = 30) +
+  xlab("sum of blast hit length") +
+  theme_bw()
+
+totallength %>%
+  filter(length >= 4400 & length <= 4500) %>%
+  ggplot(mapping = aes(x = length)) + 
+  geom_histogram(bins = 25) 
+```
+
+# Coefficient of variation in read depth
+
+```{r load the coevar data}
+cvD <- read_delim("10golddepths.forcoevar.tsv", 
+    delim = "\t", escape_double = FALSE, 
+    col_names = FALSE, trim_ws = TRUE)
+
+cvD <- cvD %>%
+  rename("sample" = "X1",
+         "contig" = "X2",
+         "position" = "X3",
+         "depth" = "X4")
+```
+
+```{r get cvD statistics}
+cvDstat <- cvD %>% 
+  group_by(sample, contig) %>% 
+  summarise(avg = mean(depth),
+            var = var(depth),
+            length = length(depth),
+            coevar = sd(depth)/mean(depth))
+```
+
+```{r}
+cvDstat %>%
+  ggplot(aes(x = coevar)) +
+  geom_density() +
+  facet_wrap(~sample)
+```
+
+```{r}
+cvDstat %>%
+  ggplot(aes(x = sample, y = avg)) +
+  geom_point() +
+  geom_boxplot() +
+  scale_y_sqrt()
+
+cvD %>%
+  filter(sample == "DRX203040") %>%
+  ggplot(aes(x = position, y = depth)) +
+  geom_line() +
+  facet_wrap(~contig, ncol = 1)
+```
+
+## join with gene positions to be able to pick apart core / pT181 / other contigs
+```{r load contig lengths}
+depth_pcn_allSA <- read_table2("20240321-depth-pcn-allSA.txt", 
+    col_names = FALSE)
+
+depth_pcn_allSA <- depth_pcn_allSA %>%
+  rename("Experiment" = "X1", "contigOGname" = "X2",
+         "avgDepth" = "X3", "contigLen" = "X4")
+```
+
+```{r}
+alldepthsC <- merge(alldepths1, depth_pcn_allSA, by = c("Experiment", "avgDepth"))
+
+left_join(cvDstat, alldepthsC, by = c("sample" = "Experiment",
+                                     "contig" = "contigOGname"))
+
+left_join(cvDstat, alldepthsC, by = c("sample" = "Experiment",
+                                     "contig" = "contigOGname")) %>%
+  filter(!is.na(loc)) %>%
+  ggplot(aes(x = sample, y = avgDepth, color = loc)) +
+  geom_point() +
+  scale_y_sqrt()
+```
+
+```{r coevar by length of contig}
+left_join(cvDstat, alldepthsC, by = c("sample" = "Experiment",
+                                     "contig" = "contigOGname")) %>%
+  mutate(lenCat = ifelse(length < 5000, "short",
+                         ifelse(length < 40000, "med", "long"))) %>%
+  ggplot(aes(x = coevar)) +
+  geom_density() +
+  facet_wrap(~lenCat, nrow = 1)
+```
+length of contig does NOT impact coefficient of variation
+
+
+```{r Fig. 12 coevar by loc}
+left_join(cvDstat, alldepthsC, by = c("sample" = "Experiment",
+                                     "contig" = "contigOGname")) %>%
+  ggplot(aes(x = coevar)) +
+  geom_density() +
+  facet_wrap(~loc, nrow = 1) +
+  theme_bw()
+```
+loc doesn't matter for coevar, curves look pretty much the same
+
+
+```{r coevar by loc significance}
+forW <- left_join(cvDstat, alldepthsC, by = c("sample" = "Experiment",
+                                     "contig" = "contigOGname")) %>%
+  select(sample, coevar, loc) %>%
+  filter(!is.na(loc))
+
+wilcox.test(coevar ~ loc, data = forW)
+# location not predictive of coefficient of variation by wilcox rank sum
+```
+
+Integration position results show
+- integration both up and downstream of mecA
+- different rotation positions
+- integration forward / reverse
+
+# GLMM code (strain/time/instrument/center) is on server
+
+# Linearization position - what effect does it have on snippy results?
+we need to check and see if what I'm doing for linearization is impacting estimates of mutation rate and 
+
+load the start positions
+```{r saccver & rename}
+# most samples
+startMost <- read_delim("technicalLin/saccversstart.txt", 
+    delim = "\t", escape_double = FALSE, 
+    col_names = FALSE, trim_ws = TRUE)
+
+startMost <- startMost %>%
+  rename("sample.contig" = "X1",
+         "start" = "X2",
+         "start-1" = "X3")
+
+# nonSA samples
+startnonSA <- read_delim("technicalLin/nonSA-saccversstart.txt", 
+    delim = "\t", escape_double = FALSE, 
+    col_names = FALSE, trim_ws = TRUE)
+
+startnonSA <- startnonSA %>%
+  rename("sample.contig" = "X1",
+         "start" = "X2",
+         "start-1" = "X3") %>%
+  mutate(isSA = F) %>%
+  filter(sample.contig !="AY672108.1" & # filtering out the cloning vectors
+          sample.contig !="JX893516.1")
+
+# stragglers
+startstrag <- read_delim("technicalLin/strag-saccversstart.txt", 
+    delim = "\t", escape_double = FALSE, 
+    col_names = FALSE, trim_ws = TRUE)
+startstrag <- startstrag %>%
+  rename("sample.contig" = "X1",
+         "start" = "X2",
+         "start-1" = "X3")
+
+startSA <- full_join(startMost, startstrag) %>%
+  mutate(isSA = T)
+
+
+startSA$experiment <- startSA$sample.contig %>%
+  str_remove("-cont.*.$")
+# this is for use later
+
+startall <- full_join(startSA, startnonSA) %>%
+  select(-experiment)
+```
+
+```{r join with snippy for lindf}
+lindf <- left_join(startall, df2, by = c("sample.contig" = "SAMPLE", "isSA")) %>%
+  select(-"start-1") # remove unneeded column
+```
+
+```{r understanding lindf}
+summary(lindf$start)
+
+unique(lindf$start)
+
+lindf %>%
+  mutate(startcat = ifelse(start == 1,
+                           "one", ifelse(start > 4439, "longish",
+                                         "inpT181"))) %>%
+  select(Experiment, startcat) %>%
+  distinct() %>%
+  select(startcat) %>%
+  table()
+
+lindf %>%
+  mutate(startcat = ifelse(start == 1,
+                           "one", ifelse(start > 4439, "longish",
+                                         "inpT181"))) %>%
+  #ggplot(aes(x = as.numeric(POS), fill = startcat)) +
+  ggplot(aes(x = as.numeric(POS), fill = TYPE)) +
+  geom_histogram() +
+  facet_wrap(~startcat, scales = "free", ncol = 1)
+```
+
+just checking sample counts
+```{r}
+lindf %>%
+  distinct(sample.contig)
+```
+7,988 rows -- this has got everything
+
+what has 0 snps relative to reference?
+```{r}
+lindf%>%
+  filter(is.na(TYPE))
+```
+3 isolates + the DRX100326 reference
+INTERESTING that the 3 that are the same are nonSA that have long starts
+
+DRX100326 starts at 3084 relative to blast query
+what else does?
+
+```{r just DRX100326 linearization position isolate snps}
+lindf %>%
+  filter(start == 3084) %>%
+  # distinct(sample.contig) #1,366 have same linearization position
+  ggplot(aes(x = as.numeric(POS), fill = TYPE)) +
+  geom_histogram()
+```
+ummmmmm oh no
+if we only look at stuff with the same linearization position as the snippy reference, there are no insertions, only a handfull of deletions, and a few complex mutations
+its mostly snps
+BUT it is still the spikes that we have previously seen
+
+```{r}
+lindf %>%
+  filter(start == 3084) %>%
+  select(POS, TYPE, ALT) %>%
+  distinct() # 181 rows
+```
+
+```{r PCN check}
+left_join(lindf, set2.5backup, by = c("Experiment" = "sample")) %>%
+  filter(!is.na(PCN)) %>%
+  filter(start == 3084) %>%
+  select(Experiment, PCN, issinglecopy) %>%
+  distinct() %>%
+  #summary(PCN)
+  ggplot(aes(x = PCN)) +
+  geom_histogram() 
+```
+This linearization position is present for the full range of PCN
+
+```{r}
+left_join(lindf, set2.5backup, by = c("Experiment" = "sample")) %>%
+  filter(!is.na(PCN)) %>%
+  filter(start == 3084) %>%
+  ggplot(aes(x = as.numeric(POS), fill = TYPE)) +
+  geom_histogram() +
+  facet_wrap(~issinglecopy, ncol = 1)
+```
+Both single and multicopy pT181 with same lin position have complex & snps before pre
+
+## checking on pre-tetK mutation spike
+I want to check on thre pre-tetK mutants
+```{r start pos for tet spike samples}
+lindf %>%
+  filter(POS > 810 & POS < 820) %>%
+  # there is an outlier that was linearized outside of the canonical plasmid length - exclude for visualization
+  filter(start < 4500) %>%
+  ggplot(aes(x = as.numeric(start))) +
+  geom_histogram()
+```
+The vast majority were linearized ~3635
+Where is this in the plasmid?
+Can we tell this for all of them? Actually maybe not because this is sstart not qstart
+but for qstart its 1
+find what the annotation positions would be for the query sequence
+
+"NC_001393.1 Staphylococcus aureus plasmid pT181, complete sequence"
+This may likely be from a complete genome, not an SRA assembly
+
+if we get the annotations from something else with start 1, then get that annotation
+we'd be good
+```{r}
+lindf %>%
+  filter(start == 1) %>%
+  distinct(sample.contig)
+```
+
+## trends for early starters
+let's define this as plasmids linearized before DRX100326
+```{r pre-DRX ref starters}
+lindf %>%
+  filter(start < 3084) %>%
+  ggplot(aes(x = as.numeric(POS), fill = TYPE)) +
+  geom_histogram()
+```
+
+## correlation between start & pos
+```{r Fig. S3}
+# DRX100326 starts at 3084 relative to blast query
+lindf <- lindf %>%
+  mutate(aheadby = start - 3084)
+
+lindf %>%
+  filter(start < 4439) %>%
+  filter(!is.na(TYPE)) %>%
+  ggplot(aes(x = start, y = POS, color = TYPE)) +
+  geom_point() +
+  labs(x = "hitStart",
+       y = "Mutation Position") +
+  theme_bw()
+
+lindf %>%
+  filter(start < 5000) %>%
+  ggplot(aes(x = aheadby, y = POS, color = TYPE)) +
+  geom_point()
+```
+The mutations that occur in the spike positions occur regardless of where the start of the contig is --> the spikes are not due to a particular start position or rotation bringing in new genetic material into what we are calling pT181
+
+```{r}
+lindf %>%
+  #filter(start < 10000) %>%
+  #distinct(sample.contig) # 7,941
+  filter(start < 5000) %>%
+  distinct(sample.contig, aheadby) %>% # 7,919
+  ggplot(aes(x = aheadby)) +
+  geom_histogram()
+```
+Most start at the same place or soon after DRXref -- this looks like late rep. Some are in earlier rep
+This is a little bit of a result, by maybe belongs more in methods
+
+
+```{r}
+lindf %>%
+  filter(start < 5000) %>%
+  filter(TYPE != "snp") %>%
+  ggplot(aes(x = aheadby, y = POS, color = TYPE)) +
+  geom_point()
+```
+
+
+```{r linear model for position}
+lm(POS ~ start, data = lindf) %>%
+  summary()
+```
+
+
+## learning about samples with indels
+```{r}
+indelSamples <- lindf %>%
+  filter(TYPE == "ins" | TYPE == "del") %>%
+  select(sample.contig) %>%
+  distinct()
+
+left_join(indelSamples, lindf) %>%
+  # some contigs are long, exclude those
+  filter(start < 4500) %>%
+  select(sample.contig, start) %>%
+  distinct()%>%
+  ggplot(aes(x = start)) +
+  geom_histogram()
+```
+Most are linearized at ~3650
+but there is some variation
+
+```{r reflin vs other - indel samples}
+left_join(indelSamples, lindf) %>%
+  ggplot(aes(x = as.numeric(POS), fill = TYPE)) +
+  geom_histogram()
+```
+
+YOU CAN'T COMPARE SSTART TO DRXREF START!
+add a column to dataframe that would let you do that
+
+DRX100326 starts at 3084 relative to blast query
+
+```{r}
+lindf %>%
+  select(sample.contig, aheadby) %>%
+  distinct() %>%
+  filter(aheadby < 4000) %>%
+  ggplot(aes(x = aheadby)) +
+  geom_histogram()
+```
+most pT181 are linearized a little later in the plasmid than the snippy ref
+This is in tetK and explains why I was having problems doing in silico PCR for it
+DRX snippy ref is linearized right before tetK
+
+Bactopia annotation for DRX ref
+125	979	.	+	0	tet(K) --- TETK
+1165	2406	.	+	0	plasmid recombination protein --- PRE
+2592	2693	.	+	0	product=hypothetical protein
+2933	3877	.	+	0	replication initiation protein --- REPC
+
+Bakta annotation for norm 
+Prodigal	CDS	45	794	.	+	0	Name=Replication initiation protein
+Bakta	CDS	862	912	.	+	0	Name=OrfE
+Prodigal	CDS	956	2335	.	+	0	Name=tetracycline efflux MFS transporter Tet(K)
+Prodigal	CDS	2521	3762	.	+	0	ID=JAIFDI_00020;Name=Plasmid recombination enzyme type 3 --- pre
+
+BLAST+	oriC	3763	4288	.	?	.	Name=origin of replication
+
+Prodigal	CDS	3948	4049	.	+	0	Name=CPBP family intramembrane metalloprotease
+
+Infernal	ncRNA	4100	4194	1.3e-14	-	.gene=ctRNA_pT181;product=ctRNA
+
+
+### look at long contig mutation patterns
+
+```{r}
+gt4439 <- alldepthsC %>%
+  filter(loc == "pT181") %>%
+  filter(contigLen > 4439)
+
+left_join(gt4439, lindf, by = "Experiment") %>%
+  #distinct(Experiment) # 4,615 rows
+  ggplot(aes(x = as.numeric(POS), fill = TYPE)) +
+  geom_histogram()
+
+left_join(gt4439, lindf, by = "Experiment") %>%
+  #filter(start < 2*10^4) %>%
+  #filter(start < 5000) %>%
+  filter(start > 3500 & start < 4000) %>%
+  ggplot(aes(x = start)) +
+  geom_histogram()
+```
+Most have start ~3635 area
+DRXref linearizes at 3084 in its own position (this is before tetK)
+
+snippy uses *normalized DRXref*
+positions are relative to normalized pT181
+gene plot is correct - those are the correct locations
+
+
+## look for mutations exclusive to long contigs
+split dataset up into <= 4439bp and >= 4440bp
+then, look for mutations present in 4440+ dataset that aren't in short one
+
+```{r}
+pT181len <- alldepthsC %>%
+  filter(loc == "pT181") %>%
+  select(Experiment, contig, contigLen)
+```
+
+```{r splitting df short/long}
+longMut <- left_join(lindf, pT181len, by = "Experiment") %>%
+  filter(!is.na(contigLen)) %>%
+  mutate(lengthCat = ifelse(as.numeric(contigLen) > 4439, "long", "short")) %>%
+  filter(lengthCat == "long") %>%
+  group_by(POS, TYPE) %>%
+  mutate(countOfPosT = n()) %>%
+  filter(countOfPosT > 1) %>%
+  select(POS, TYPE, REF, ALT) %>%
+  distinct()
+
+shortMut <- left_join(lindf, pT181len, by = "Experiment") %>%
+  filter(!is.na(contigLen)) %>%
+  mutate(lengthCat = ifelse(as.numeric(contigLen) > 4439, "long", "short")) %>%
+  filter(lengthCat == "short") %>%
+  select(POS, TYPE) %>%
+  mutate(countOfPosT = n()) %>%
+  filter(countOfPosT > 1) %>%
+  distinct()
+```
+
+I'm curious about the short contigs -- do they have any indels?
+```{r short mut}
+shortMut %>%
+  ggplot(aes(as.numeric(POS), fill = TYPE)) +
+  geom_histogram()
+```
+YES, they do -- scattered across the plasmid
+The presence of indels should not immediately trigger red flags
+
+```{r all mut on short contigs}
+left_join(lindf, pT181len, by = "Experiment") %>%
+  filter(!is.na(contigLen)) %>%
+  mutate(lengthCat = ifelse(as.numeric(contigLen) > 4439, "long", "short")) %>%
+  filter(lengthCat == "short") %>%
+  ggplot(aes(x = as.numeric(POS), fill = TYPE)) +
+  geom_histogram()
+```
+Spikes are in the same place
+don't see a before tetK spike in quite the same place but there is a deletion there
+Can't really have long mut for the short contigs
+
+```{r long mut}
+longMut %>%
+  ggplot(aes(as.numeric(POS), fill = TYPE)) +
+  geom_histogram()
+```
+
+
+
+```{r only 2+ long}
+anti_join(longMut, shortMut, by = c("POS", "TYPE")) %>%
+  #View()
+  filter(TYPE != "snp") %>%
+  ggplot(aes(x = as.numeric(POS), fill = TYPE)) +
+  geom_histogram()
+```
+
+
+where are the spikes?
+```{r}
+aj.df <- anti_join(longMut, shortMut, by = c("POS", "TYPE")) %>%
+  filter(TYPE != "snp")
+
+left_join(aj.df, lindf, by = c("POS", "TYPE", "REF", "ALT")) %>%
+  ungroup() %>%
+  distinct(sample.contig) # 1,309 rows
+
+
+left_join(aj.df, lindf, by = c("POS", "TYPE", "REF", "ALT")) %>%
+  ungroup() %>%
+  group_by(sample.contig) %>%
+  mutate(occurance = n()) %>%
+  ggplot(aes(x = as.numeric(POS), fill = TYPE)) +
+  geom_histogram() +
+  facet_wrap(~occurance, ncol = 1, scales = "free")
+```
+All of the isolates with 3 spikes (n = 5) have the spikes  at 814, 3197, & 3672
+2 spikes (n = 19)
+1 spike (n = 1,285)
+
+
+```{r}
+left_join(aj.df, lindf, by = c("POS", "TYPE", "REF", "ALT")) %>%
+  ungroup() %>%
+  group_by(sample.contig) %>%
+  mutate(occurance = n()) %>%
+  left_join(., set2.5backup, by = c("Experiment" = "sample")) %>%
+  filter(!is.na(PCN)) %>%
+  select(POS:ALT, Experiment, PCN, issinglecopy) %>%
+  ungroup() %>%
+  #distinct(Experiment) # 593 rows
+  select(Experiment, PCN) %>%
+  distinct() %>%
+  View() # some are singlecopy, some are multicopy
+```
+
+
+```{r}
+left_join(aj.df, lindf, by = c("POS", "TYPE", "REF", "ALT")) %>%
+  ungroup() %>%
+  group_by(sample.contig) %>%
+  mutate(occurance = n()) %>%
+  ungroup() %>%
+  left_join(., set2.5backup, by = c("Experiment" = "sample")) %>%
+  filter(!is.na(PCN)) %>%
+  select(POS:ALT, Experiment, PCN, issinglecopy) %>%
+  ggplot(aes(x = as.numeric(POS), fill = TYPE)) +
+  geom_histogram() +
+  facet_wrap(~issinglecopy, ncol = 1, scales = "free")
+```
+
+```{r}
+left_join(aj.df, lindf, by = c("POS", "TYPE", "REF", "ALT")) %>%
+  ungroup() %>%
+  group_by(sample.contig) %>%
+  mutate(occurance = n()) %>%
+  ungroup() %>%
+  left_join(., set2.5backup, by = c("Experiment" = "sample")) %>%
+  select(POS:ALT, Experiment, PCN, issinglecopy) %>%
+  filter(PCN > 50) %>%
+  ggplot(aes(x = as.numeric(POS), fill = TYPE)) +
+  geom_histogram() 
+```
+
+
+Let me write about this
+
+if linearization is causing extra sequence to get pulled in, we should see a higher rate of indels and complex mutations in long contigs compared to short contigs
+
+we can check that statistically
+
+```{r getting cat total}
+left_join(lindf, pT181len, by = "Experiment") %>%
+  filter(!is.na(contigLen)) %>%
+  mutate(lengthCat = ifelse(as.numeric(contigLen) > 4439, "long", "short")) %>%
+  ungroup() %>%
+  select(Experiment, lengthCat) %>%
+  distinct() %>%
+  select(lengthCat) %>%
+  table()
+```
+
+```{r prop mut in cat}
+left_join(lindf, pT181len, by = "Experiment") %>%
+  filter(!is.na(contigLen)) %>%
+  mutate(lengthCat = ifelse(as.numeric(contigLen) > 4439, "long", "short"),
+         catTotal = ifelse(lengthCat == "long", 4609, 1114)) %>%
+  ungroup() %>%
+  select(Experiment, lengthCat, catTotal, POS, TYPE, ALT) %>%
+  group_by(lengthCat, POS, TYPE, ALT) %>%
+  mutate(countInCat = n(),
+         propCat = countInCat/catTotal)
+```
+
+```{r}
+left_join(lindf, pT181len, by = "Experiment") %>%
+  filter(!is.na(contigLen)) %>%
+  mutate(lengthCat = ifelse(as.numeric(contigLen) > 4439, "long", "short"),
+         catTotal = ifelse(lengthCat == "long", 4609, 1114)) %>%
+  ungroup() %>%
+  select(Experiment, lengthCat, catTotal, POS, TYPE, ALT) %>%
+  group_by(lengthCat, POS, TYPE, ALT) %>%
+  mutate(countInCat = n(),
+         propCat = countInCat/catTotal) %>%
+  ungroup() %>%
+  select(lengthCat:countInCat) %>%
+  distinct() # 584 rows
+
+chiPrep <- left_join(lindf, pT181len, by = "Experiment") %>%
+  filter(!is.na(contigLen)) %>%
+  mutate(lengthCat = ifelse(as.numeric(contigLen) > 4439, "long", "short"),
+         catTotal = ifelse(lengthCat == "long", 4609, 1114)) %>%
+  ungroup() %>%
+  select(Experiment, lengthCat, catTotal, POS, TYPE, ALT) %>%
+  group_by(lengthCat, POS, TYPE, ALT) %>%
+  mutate(countInCat = n(),
+         propCat = countInCat/catTotal) %>%
+  ungroup() %>%
+  select(lengthCat, POS:propCat) %>%
+  distinct()
+
+chiPrep$allele <- paste0(chiPrep$POS,"-", chiPrep$TYPE,"-", chiPrep$ALT)
+```
+
+```{r}
+chiPrep %>%
+  ggplot(aes(x = allele, y = countInCat)) +
+  geom_col()
+```
+
+
+
+```{r chi further set up}
+chiT <- chiPrep %>%
+  select(allele, lengthCat, countInCat) %>%
+  pivot_wider(names_from = lengthCat, values_from = countInCat) %>%
+  mutate_all(~replace(.,is.na(.),0)) 
+
+chi.table <- as.table(rbind(chiT$long, chiT$short))
+
+dimnames(chi.table) <- list(
+  length = c("long", "short"),
+  allele = c(chiT$allele)
+  )
+
+chi.table
+
+XsqT <- chisq.test(chi.table)
+
+XsqT$residuals  # Pearson residuals
+XsqT$stdres
+XsqT$expected
+XsqT$observed
+```
+
+
+```{r trying again}
+distinctA <- left_join(lindf, pT181len, by = "Experiment") %>%
+  filter(!is.na(contigLen)) %>%
+  mutate(lengthCat = ifelse(as.numeric(contigLen) > 4439, "long", "short"),
+         catTotal = ifelse(lengthCat == "long", 4609, 1114)) %>%
+  ungroup() %>%
+  select(POS:Experiment, lengthCat, catTotal) %>%
+  group_by(POS, TYPE, lengthCat) %>%
+  mutate(countPOStypeCat = n()) %>%
+  filter(TYPE != "snp") %>%
+  ungroup() %>%
+  mutate(catWithout = catTotal - countPOStypeCat) %>%
+  select(POS, TYPE, lengthCat:catWithout) %>%
+  distinct()
+
+distinctA$pos.type <- paste0(distinctA$POS,"-", distinctA$TYPE)
+```
+
+
+```{r}
+chiset <- distinctA %>%
+  select(-POS, -TYPE, -catTotal, -catWithout) %>%
+  pivot_wider(names_from = lengthCat,
+              values_from = countPOStypeCat) %>%
+  mutate_all(~replace(.,is.na(.),0)) %>%
+  mutate(longWithout = 4609 - long,
+         shortWithout = 1114 - short)
+chiset
+```
+
+
+```{r chisq function}
+chisq_last4cols <- function(row) {
+  # Extract last 4 values of the row
+  counts <- as.numeric(tail(row, 4))
+  
+  # Create 2x2 matrix:
+  # Rows: long vs short
+  # Columns: with vs without mutation
+  # Order: long, longWithout, short, shortWithout
+  mat <- matrix(c(counts[1], counts[3], counts[2], counts[4]), nrow = 2,
+                byrow = FALSE)
+  
+  # Run chi-square test
+  test <- chisq.test(mat)
+  
+  # Return p-value
+  return(c(p_value = test$p.value))
+}
+```
+
+
+```{r apply chisquare test to df}
+chiset$pval <- apply(chiset, 1, chisq_last4cols)
+```
+
+```{r}
+chiset %>%
+  filter(pval < 0.05/113) 
+```
+There is nothing universal to either long or short or even at that high of a frequency
+
+## mutations on canonical PCN isolates
+```{r}
+left_join(lindf, pT181len, by = "Experiment") %>%
+  filter(!is.na(contigLen)) %>%
+  left_join(., all86k, by = c("Experiment" = "sample")) %>%
+  filter(PCN > 18 & PCN < 26) %>%
+  ggplot(aes(x = as.numeric(POS), fill = TYPE)) +
+  geom_histogram() +
+  #facet_wrap(~start, scales = "free_y")
+  facet_wrap(~contigLen, scales = "free_y")
+```
+Canonical PCN (18 < PCN < 26) plasmids have spikes as well
+Don't really see signal for start position or contig length
+
+
+# checking on All The Bacteria filtering
+does it remove samples from all86k?
+```{r}
+all86k %>%
+  select(sample, year, strain, rank, PCN, CC, pubmlst_cc.x, type) %>%
+  distinct() %>%
+  filter(!is.na(year)) %>% # 42,522
+  filter(!is.na(strain)) %>% # 26,815
+  filter(rank == "gold") %>% # 19,654
+  filter(!is.na(PCN)) %>% # 2,694
+  filter(!is.na(CC)) %>% # 2,490 
+  #or
+  #filter(!is.na(pubmlst_cc.x)) # 2,053 -- don't use this one
+  filter(!is.na(type)) # 2,460
+```
+Yes, using AllTheBacteria removed additional genomes -- 30 samples
+
+# position in completes
+
+Now that there are only 14, you can manually check to see if they are on the chromosome or free or on another plasmid
+```{r}
+inner_join(dnaA_start_coords, comsite, by = "samplematch") %>%
+  select(sseqid) %>%
+  distinct(
+  )
+
+position14 <- inner_join(dnaA_start_coords, comsite, by = "samplematch")
+
+```
+
+```{r}
+left_join(position14, X14_description_ncbi, by = "sseqid") %>%
+  select(sseqid, pident:position) %>%
+  distinct() %>%
+  ggplot(aes(xmin = sstart, xmax = send, y = sseqid
+             #color = position
+             )) +
+  geom_gene_arrow() +
+  facet_wrap(~position, scales = "free")
+```
+
+7 integrated into chromosome
+3 free
+4 integrated into other plasmids
+
+```{r}
+left_join(position14, X14_description_ncbi, by = "sseqid") %>%
+  select(sseqid, pident:position) %>%
+  distinct() %>%
+  filter(position == "chromInt") %>%
+  ggplot(aes(xmin = sstart, xmax = send, y = sseqid
+             )) +
+  geom_gene_arrow() 
+```
+
+Need to investigate the hits that occur in CP022902 -- the far fragments look too small
+confirmed (block below - real hit is 58-63k, others should not be considered pT181)
+all (other) integrations occurring 55k-85k position
+5 forward, 2 reverse
+
+```{r}
+left_join(position14, X14_description_ncbi, by = "sseqid") %>%
+  select(sseqid, pident:position) %>%
+  distinct() %>%
+  filter(sseqid == "NZ_CP022902.1")
+```
+
+```{r}
+left_join(position14, X14_description_ncbi, by = "sseqid") %>%
+  select(sseqid, pident:position) %>%
+  distinct() %>%
+  filter(position == "plasInt") %>%
+  ggplot(aes(xmin = sstart, xmax = send, y = sseqid
+             )) +
+  geom_gene_arrow() 
+```
+
+1 integrated forward, 3 integrated reverse
+In 4 different plasmids (lengths 21-44kbp)
+
+```{r}
+X14_description_ncbi %>%
+  filter(position == "plasInt") #%>%
+  #select(description)
+```
+
+I want to get the gene positions in/around/near pT181 for the 14
+this block is just for integrated
+```{r}
+position14 %>%
+  filter(start > 55000 & end < 90000) %>%
+  filter(!is.na(symbol)) %>%
+  select(gene:samplematch, sseqid) %>%
+  distinct() %>%
+  ggplot(aes(xmin = start, xmax = end, y = sseqid,
+             color = symbol,
+             fill = ifelse(symbol == "tet(K)", T, F))) +
+  geom_gene_arrow()
+```
+
+```{r Fig. S3: region of pT181 insertion in complete chrom}
+position14 %>%
+  filter(start > 55000 & end < 90000) %>%
+  filter(!is.na(symbol)) %>%
+  select(gene:samplematch) %>%
+  distinct() %>%
+  filter(symbol != "tet(K)" &
+           symbol != "repC" &
+           symbol != "pre") %>%
+  ggplot(aes(x = symbol, fill = species_category)) + 
+  geom_bar() +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 90)) +
+  labs(x = "gene",
+       y = "# genomes found in",
+       fill = "gene category")
+```
+
+
+# citations
+```{r}
+citation()
+```
+
+
