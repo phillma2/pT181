@@ -3,7 +3,7 @@ Repo for code associated with pT181 project (Phillips et al. 2025, bioRxiv)
 "Transition of Staphylococcus aureus tetracycline resistance plasmid pT181 from independent multicopy replicon to predominantly integrated chromosomal element over 65 years"
 
 
-## example scripts
+## scripts
 finding pT181
 - blast.1.sh - find pT181 in genomes
 - getcol.1.sh - get samples clearing 4400bp threshold, start position
@@ -28,7 +28,13 @@ trees
 - cds.partitions - regions of seq to be partitioned for CDS tree
 - *.contree & *.treefile - trees, newick format
 
-files found elsewhere
+clinker
+- gettingthecontigs.sh - pull out SRA contigs to be used for clinker figure
+- bakta.sh - annotate contigs
+- genes.red.csv - geneIDs for figure
+- clinker.sh - run clinker
+
+## files found elsewhere
 - staphopia_v2_all_report.txt in Zenodo for Raghuram et al. 2024 msystems 
 (https://zenodo.org/records/10471309)
 - isolate_substrain_strain_freq_st_CC.tsv same as above
