@@ -23,6 +23,11 @@ rotation (of the plasmid)
 - prelin.sh - remove extra header; prep for picard
 - picard.sh - normalize pt181 contigs
 
+trees
+- iqtree.sh - commands for building trees
+- cds.partitions - regions of seq to be partitioned for CDS tree
+- *.contree & *.treefile - trees, newick format
+
 files found elsewhere
 - staphopia_v2_all_report.txt in Zenodo for Raghuram et al. 2024 msystems 
 (https://zenodo.org/records/10471309)
