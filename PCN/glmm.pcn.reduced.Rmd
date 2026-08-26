@@ -372,7 +372,7 @@ oe5 %>%
   arrange(desc(straincount))
 ```
 
-```{r}
+```{r winning glmm}
 m21 = glmmTMB(PCN ~ numYear + strainFac +
                 (1|strainFac:BioProject) +
                 (1|numYear:BioProject), # AIC is lower with them both included 
@@ -433,3 +433,855 @@ oe5 %>%
   select(strain) %>%
   distinct()
 ```
+
+##checking instrument in oe5
+
+Are all bioprojects in this set sequenced on 1 machine?
+```{r}
+oe5 %>%
+  select(BioProject, Instrument) %>%
+  distinct() %>%
+  group_by(BioProject) %>%
+  mutate(uniqInstrument = n())
+```
+Some bioprojects were sequenced on 2 machines, most were sequenced on 1
+
+## oe5 how big are the bioprojects?
+
+```{r}
+oe5 %>%
+  group_by(BioProject) %>%
+  mutate(size = n()) %>%
+  select(BioProject, size) %>%
+  distinct() %>%
+  arrange(desc(size))
+```
+2 bioprojects account for >50% of the samples in the oe5 dataset
+
+what do their time & PCN trends look like?
+
+```{r}
+oe5 %>%
+  filter(BioProject == "PRJEB2812" | BioProject == "PRJEB9575") %>%
+  ggplot(aes(x = as.numeric(year), y = PCN,
+             shape = BioProject, color = strain)) +
+  geom_point()
+```
+okay, so one of the big bioprojects is all the early samples
+this could be good but also bad?
+when were these sequenced...?
+
+```{r}
+oe5 %>%
+  filter(BioProject == "PRJEB2812") %>%
+  ggplot(aes(x = as.numeric(year), y = PCN, color = strain)) +
+  geom_point()
+
+## we don't have date of sequencing in this dataset
+## would need to go back to the other one...
+```
+
+we may need to look at some of the papers themselves...
+from SRA
+matching projects with publications
+PRJEB2812 - https://pubmed.ncbi.nlm.nih.gov/24713324/
+PRJEB9575 - no paper
+PRJNA418899 - no paper
+PRJNA324190 - no paper
+PRJEB2686 - https://pubmed.ncbi.nlm.nih.gov/26873713/
+
+```{r}
+setMC %>%
+  filter(as.numeric(year) < 1995) %>%
+  ggplot(aes(x = as.numeric(year), y = PCN, color = BioProject)) +
+  geom_point()
+
+## also check: do these bioprojects have some lower copy isolates (later)?
+# evidence for this to be true vs untrue?
+# we can't find obvious sign of technical issue (will look in revisions)
+# multiple bioprojects have similar ranges of pcn (mention this to reviewer)
+# there is evidence that this is not a technical effect, but we will investigate in revisions.
+```
+SEVERAL BioProjects in similar range!!
+
+BioProjects...
+```{r}
+set2.5backup %>%
+  filter(BioProject == "PRJEB131165" |
+           BioProject == "PRJEB14816" |
+           BioProject == "PRJEB2812" |
+           BioProject == "PRJEB2998" |
+           BioProject == "PRJNA228475" |
+           BioProject == "PRJNA231221" |
+           BioProject == "PRJNA267633" |
+           BioProject == "PRJNA374337") %>%
+  ggplot(aes(x = as.numeric(year), y = PCN, color = BioProject)) +
+  geom_point() +
+  theme_bw() +
+  xlab("Year of Collection")
+```
+
+Multiple BioProjects find the same result, where earlier samples have higher copy number compared to later samples. We expect consistency of methods within a BioProject
+
+# getting info on the bioprojects
+I'm coming back now to get the BioProjects for multicopy plasmids
+I need to get info on the extraction technique
+(also get date of sequencing -- but that's for later)
+
+```{r}
+setMC %>%
+  select(BioProject) %>%
+  distinct() # 75 BioProjects have a multicopy plasmid
+
+setMC %>%
+  select(BioProject, prepost) %>%
+  distinct() %>%
+  group_by(BioProject) %>%
+  mutate(count = n()) %>%
+  filter(count > 1) %>% # 3 bioprojects have samples both pre/post
+  distinct(BioProject)
+```
+The 3 bioprojects pre/post are
+PRJEB14816
+PRJEB13165
+PRJNA374337
+
+```{r}
+setMC %>%
+  filter(BioProject == "PRJEB14816" | BioProject == "PRJEB13165" |
+           BioProject == "PRJNA374337") %>%
+  ggplot(aes(x = as.numeric(year), color = BioProject, y = PCN)) +
+  geom_point()
+```
+Withink the 3 BioProjects that cross the 1995 line, they all show substantial decline in multicopy PCN over time
+
+This isn't enough points to really do statistics but is certainly a start
+
+I think we do need to look at the papers
+It is the best use of time to look at the largest bioprojects 1st
+
+```{r}
+setMC %>%
+  group_by(BioProject) %>%
+  mutate(BPsize = n()) %>%
+  select(BioProject, BPsize) %>%
+  distinct() %>%
+  arrange(desc(BPsize))
+```
+matching projects with publications - top 5
+PRJEB2812 - https://pubmed.ncbi.nlm.nih.gov/24713324/ - dordel et al 2014, extraction technique not clear
+PRJEB9575 - found with web search, https://pmc.ncbi.nlm.nih.gov/articles/PMC5573676/ - Moradigaravand et al 2017, QIAxtractor (Qiagen)
+PRJNA418899 - found with web search, https://elifesciences.org/articles/42486 - Young et al 2019, mechanical lysis step (FastPrep; MPBiomedicals) followed by a commercial kit (QuickGene; Autogen Inc)
+PRJNA324190 - web search finds a paper that uses the data https://pmc.ncbi.nlm.nih.gov/articles/PMC11730646/
+PRJEB2686 - https://pubmed.ncbi.nlm.nih.gov/26873713/ -- chang et al 2016, QIAamp DNA Mini Kit
+(Qiagen)
+
+Next 5 bioprojects
+PRJEB2998	- not findable			
+PRJEB2655 - 5 papers (https://www.ncbi.nlm.nih.gov/bioproject/?term=(PRJEB2655)+AND+bioproject_sra%5Bfilter%5D+NOT+bioproject_gap%5Bfilter%5D) - 1 "prev described", 4 Genomic DNA was extracted using the MasterPure™ Gram Positive DNA Purification Kit (Cambio, Dry Drayton, UK)
+PRJEB2870 - https://pmc.ncbi.nlm.nih.gov/articles/PMC4020051 - Uhleman et al	, QIAamp DNA Mini Kit (Qiagen)			
+PRJNA368710 - found with web search, https://www.sciencedirect.com/science/article/pii/S2451945617300971 - wang et al 2017 - DNA Blood and Tissue Kit 69504 Qiagen	
+PRJNA369475	- found with web search, https://elifesciences.org/articles/30637 - young et al 2017, DNA extracted using a mechanical lysis step (FastPrep; MPBiomedicals) followed by a commercial kit (QuickGene; Fujifilm)
+
+Let's just look at all bioprojects with at least 10 mc pt181
+PRJEB11627 - found with web search, https://pmc.ncbi.nlm.nih.gov/articles/PMC4809937/ - Strauß et al 2016, Staphylococcal chromosomal DNA was extracted using the MagAttract HMW DNA kit (Qiagen) according to the manufacturer's instructions for Gram-positive bacteria.
+PRJEB11177 - found with web search, https://journals.plos.org/plosmedicine/article?id=10.1371/journal.pmed.1001944 - Auguet et al 2016, methods from hughes et al 2015 (https://academic.oup.com/jac/article-abstract/70/12/3191/2363662?redirectedFrom=fulltext&login=true) - extraction technique unclear
+PRJNA445516 - found with web search, https://pmc.ncbi.nlm.nih.gov/articles/PMC6113501/ - Mason et al 2018, extraction technique not clear	
+
+also need to prioritize looking for papers from the projects with early seq
+```{r}
+setMC %>%
+  filter(prepost == "pre") %>%
+  group_by(BioProject) %>%
+  mutate(BPsize = n()) %>%
+  select(BioProject, BPsize) %>%
+  distinct() %>%
+  arrange(desc(BPsize))
+```
+PRJEB2812	- found with web search, HARKINS MRSA PAPER - Qiagen QIAcube
+PRJEB2998	- not findable			
+PRJNA374337 - found with abstract search, https://pmc.ncbi.nlm.nih.gov/articles/PMC5932376/ - extraction technique not clear
+PRJEB14816 - found with web search, https://pmc.ncbi.nlm.nih.gov/articles/PMC5724248/ - extraction technique not clear
+PRJNA231221 - fda-argos, https://www.ncbi.nlm.nih.gov/pubmed/31346170 - extraction technique not readily apparent
+PRJNA267633 - https://www.ncbi.nlm.nih.gov/pubmed/26112789 - they cite their extraction technique from this paper which is about trees (https://www.afs-journal.org/articles/forest/abs/1999/03/AFS_0003-4312_1999_56_3_ART0008/AFS_0003-4312_1999_56_3_ART0008.html)
+PRJNA228475 - not findable
+PRJEB13165 - found with web search, https://pmc.ncbi.nlm.nih.gov/articles/PMC12691627/ & https://journals.asm.org/doi/10.1128/mbio.01755-19 - extraction technique unclear
+
+let's look at the bioprojects we have extraction info for
+```{r}
+setMC %>%
+  filter(BioProject == "PRJEB9575" |
+           BioProject == "PRJNA418899" |
+           BioProject == "PRJEB2686" |
+           BioProject == "PRJEB2655" |
+           BioProject == "PRJEB2870" |
+           BioProject == "PRJNA368710" |
+           BioProject == "PRJNA369475" |
+           BioProject == "PRJEB11627" |
+           BioProject == "PRJEB2812") %>%
+  ggplot(aes(x = as.numeric(year),
+             color = BioProject,
+             y = PCN)) +
+  geom_point()
+
+setMC %>%
+  filter(BioProject == "PRJEB9575" | # qiaxtractor
+           BioProject == "PRJNA418899" | #fastprep/quickgene
+           BioProject == "PRJEB2686" | # QIAamp DNA Mini Kit (Qiagen)
+           BioProject == "PRJEB2655" | # masterpure
+           BioProject == "PRJEB2870" | # QIAamp DNA Mini Kit (Qiagen)
+           BioProject == "PRJNA368710" | # DNA Blood and Tissue Kit 69504 Qiagen
+           BioProject == "PRJNA369475" | #fastprep/quickgene
+           BioProject == "PRJEB11627" | # MagAttract HMW DNA kit (Qiagen) 
+           BioProject == "PRJEB2812") %>% # Qiagen QIAcube
+  filter(prepost == "pre") %>%
+  ggplot(aes(x = as.numeric(year),
+             color = BioProject,
+             y = PCN)) +
+  geom_point() ## there is only 1 bioproject with old samples for that we have extraction technique for
+```
+
+the old project uses Qiagen QIAcube
+chemistry for QIAamp DNA Mini Kit & QIAcube are the same (allegedly)
+let's look at projects using those kits
+
+```{r}
+setMC %>%
+  filter(BioProject == "PRJEB2686" | # QIAamp DNA Mini Kit (Qiagen)
+           BioProject == "PRJEB2870" | # QIAamp DNA Mini Kit (Qiagen)
+           BioProject == "PRJNA368710" | # DNA Blood and Tissue Kit 69504 Qiagen
+           BioProject == "PRJEB2812") %>% # Qiagen QIAcube
+  ggplot(aes(x = as.numeric(year),
+             color = BioProject,
+             y = PCN)) +
+  geom_point()
+```
+
+```{r the 3 bioproj that cross the line}
+setMC %>%
+  filter(BioProject == "PRJEB14816" | # extraction technique not clear
+           BioProject == "PRJEB13165" | # extraction technique not clear
+           BioProject == "PRJNA374337") %>% # extraction technique not clear
+  ggplot(aes(x = as.numeric(year), color = strain, y = PCN,
+             shape = centername)) +
+  geom_point()
+```
+
+looking at just the recent bioproject
+```{r}
+setMC %>%
+  filter(BioProject == "PRJEB9575" | # qiaxtractor
+           BioProject == "PRJNA418899" | #fastprep/quickgene
+           BioProject == "PRJEB2686" | # QIAamp DNA Mini Kit (Qiagen)
+           BioProject == "PRJEB2655" | # masterpure
+           BioProject == "PRJEB2870" | # QIAamp DNA Mini Kit (Qiagen)
+           BioProject == "PRJNA368710" | # DNA Blood and Tissue Kit 69504 Qiagen
+           BioProject == "PRJNA369475" | #fastprep/quickgene
+           BioProject == "PRJEB11627" #| # MagAttract HMW DNA kit (Qiagen) 
+           # BioProject == "PRJEB2812"
+           ) %>% # Qiagen QIAcube
+  ggplot(aes(x = as.numeric(year),
+             color = BioProject,
+             y = PCN)) +
+  geom_point()
+```
+this is just over the course of a decade, but it looks like these are all pretty similar ranges between these projects
+
+let's check: do we see signal for extraction technique...?
+
+```{r}
+setMC %>%
+  mutate(extec = ifelse(BioProject == "PRJEB9575", "qiaxtractor",
+                        ifelse(BioProject == "PRJNA418899",
+                               "fastprep_quickgene",
+                               ifelse(BioProject == "PRJEB2686",
+                                      "QIAamp_DNA_Mini",
+                                      ifelse(BioProject == "PRJEB2655",
+                                             "masterpure",
+                                             ifelse(BioProject == "PRJEB2870",
+                                                    "QIAamp_DNA_Mini",
+                                                    ifelse(BioProject == "PRJNA368710",
+                                                           "DNA_Blood&Tissue69504Qiagen",
+                                                           ifelse(BioProject == "PRJNA369475",
+                                                                  "fastprep_quickgene",
+                                                                  ifelse(BioProject == "PRJEB11627",
+                                                                         "MagAttractHMWQiagen",
+                                                                         ifelse(BioProject == "PRJEB2812",
+                                                                                "qiacube",
+                                                                                NA)))))))))) %>%
+  filter(!is.na(extec)) %>%
+  select(sample, Instrument, BioProject, PCN,
+         issinglecopy, year, CC, strain:mecA, prepost, centername, extec) %>%
+  filter(BioProject != "PRJEB2812") %>%
+  ggplot(aes(x = as.numeric(year),
+             color = BioProject,
+             shape = extec,
+             y = PCN)) +
+  geom_point()
+```
+BioProjects have a very narrow time range of collection for the not-old one in this case,
+can exclude that from vis
+
+```{r}
+setMCex <- setMC %>%
+  mutate(extec = ifelse(BioProject == "PRJEB9575", "qiaxtractor",
+                        ifelse(BioProject == "PRJNA418899",
+                               "fastprep_quickgene",
+                               ifelse(BioProject == "PRJEB2686",
+                                      "QIAamp_DNA_Mini",
+                                      ifelse(BioProject == "PRJEB2655",
+                                             "masterpure",
+                                             ifelse(BioProject == "PRJEB2870",
+                                                    "QIAamp_DNA_Mini",
+                                                    ifelse(BioProject == "PRJNA368710",
+                                                           "DNA_Blood&Tissue69504Qiagen",
+                                                           ifelse(BioProject == "PRJNA369475",
+                                                                  "fastprep_quickgene",
+                                                                  ifelse(BioProject == "PRJEB11627",
+                                                                         "MagAttractHMWQiagen",
+                                                                         ifelse(BioProject == "PRJEB2812",
+                                                                                "qiacube",
+                                                                                NA)))))))))) %>%
+  filter(!is.na(extec))
+  
+setMCex %>%
+  select(sample, Instrument, BioProject, PCN,
+         issinglecopy, year, CC, strain:mecA, prepost, centername, extec) %>%
+  filter(BioProject != "PRJEB2812") %>%
+  ggplot(aes(x = PCN,
+             fill = as.factor(BioProject))) +
+  geom_histogram(position = "stack") +
+  facet_wrap(~extec, ncol = 2)
+```
+
+what if we look by strain?
+```{r}
+setMCex %>%
+  filter(BioProject != "PRJEB2812") %>%
+  ggplot(aes(x = PCN,
+             fill = as.factor(strain))) +
+  geom_histogram(position = "stack") +
+  facet_wrap(~extec, ncol = 2)
+```
+okay, so the 2 peaks for fastprep are likely generated by STRAIN DIFFERENCES
+these have identical protocols and were from the young et al papers 
+let's zoom in
+```{r}
+setMCex %>%
+  filter(extec == "fastprep_quickgene") %>%
+  ggplot(aes(x = PCN,
+             fill = strain)) +
+  geom_histogram() +
+  facet_wrap(~BioProject, ncol = 1)
+```
+
+type the protocols
+```{r}
+setMCex <- setMCex %>%
+  mutate(extype = ifelse(BioProject == "PRJEB9575" |
+                           BioProject == "PRJEB2686" |
+                           BioProject == "PRJEB2870" |
+                           BioProject == "PRJNA368710" |
+                           BioProject == "PRJEB11627" |
+                           BioProject == "PRJEB2812",
+                         "silica",
+                         ifelse(BioProject == "PRJNA418899" |
+                                  BioProject == "PRJNA369475",
+                               "same_unknown", "salt")))
+```
+
+```{r}
+setMCex %>%
+  ggplot(aes(x = as.numeric(year), y = PCN, color = extype)) +
+  geom_point()
+```
+looks good!!!
+
+```{r}
+setMCex %>%
+  filter(as.numeric(year) > 2000) %>%
+  ggplot(aes(x = PCN)) +
+  geom_histogram(binwidth = 1) +
+  facet_wrap(~extype, ncol = 1)
+```
+the difference in pcn between kits might be real
+let's check some other things too
+
+```{r}
+setMCex %>%
+  group_by(Instrument) %>%
+  mutate(ins_ct = n()) %>%
+  distinct(Instrument, ins_ct)
+```
+3 different instruments used...
+most were sequenced on hiseq 2000
+
+```{r}
+setMCex %>%
+  ggplot(aes(x = as.numeric(year), y = PCN, color = extype,
+             shape = Instrument)) +
+  geom_point()
+```
+
+```{r}
+setMCex %>%
+  filter(as.numeric(year) > 2000) %>%
+  ggplot(aes(x = PCN, fill = extype)) +
+  geom_histogram(binwidth = 1) +
+  facet_wrap(~Instrument, ncol = 1)
+```
+
+it looks like instrument should not matter, but extraction type matters a little
+
+let's check library prep maybe....
+never mind that's not in the metadata
+
+GET DATE OF SEQUENCING
+"pubmet" files on pt181 github
+
+code borrowed from pT181 reunifyG
+```{r load sra metadata}
+### import all sra downloaded info
+pubmet_20150601_20191231 <- read_csv("pubmet-20150601-20191231.txt")
+pubmet_20200101_20220530 <- read_csv("pubmet-20200101-20220530.txt")
+pubmet_20220601_pres <- read_csv("pubmet-20220601-pres.txt")
+pubmet_onbefore20150530 <- read_csv("pubmet-onbefore20150530.txt")
+
+# combine
+c1 <- intersect(colnames(pubmet_20150601_20191231), colnames(pubmet_20200101_20220530))
+b1 <- rbind(pubmet_20150601_20191231[c1], pubmet_20200101_20220530[c1])
+
+c2 <- intersect(colnames(b1), colnames(pubmet_20220601_pres))
+b2 <- rbind(b1[c2], pubmet_20220601_pres[c2])
+
+c3 <- intersect(colnames(b2), colnames(pubmet_onbefore20150530))
+b3 <- rbind(b2[c3], pubmet_onbefore20150530[c3])
+
+#clean up the environment
+#rm(pubmet_20150601_20191231)
+#rm(pubmet_20200101_20220530)
+#rm(pubmet_20220601_pres)
+#rm(pubmet_onbefore20150530)
+```
+
+```{r}
+b3 %>%
+  select(Experiment,
+         Run, BioProject, ReleaseDate, create_date, `ENA-FIRST-PUBLIC (run)`,
+         `ENA-LAST-UPDATE (run)`, Collection_Date, INSDC_first_public, 
+         INSDC_last_update, ena_first_public, ENA_first_public) %>%
+  right_join(setMCex, by = c("Experiment" = "sample",
+                             "BioProject",
+                             "ENA-FIRST-PUBLIC (run)",
+                             "ENA-LAST-UPDATE (run)",
+                             "Collection_Date")) %>%
+  #group_by(Experiment) %>%
+  #mutate(count = n()) %>%
+  #filter(count > 1)
+  select(-Run) %>%
+  distinct() %>%
+  filter(is.na(`ENA-FIRST-PUBLIC (run)`)) # all have ReleaseDate
+# not all have create_date, ENA-FIRST-PUBLIC (run), ENA-LAST-UPDATE (run), etc
+```
+
+let's work with release date
+```{r}
+b3 %>%
+  select(Experiment, Run, BioProject, ReleaseDate) %>%
+  right_join(setMCex, by = c("Experiment" = "sample",
+                             "BioProject")) %>%
+  select(-Run) %>%
+  distinct() %>%
+  select(Experiment: ReleaseDate, Instrument, year,
+         PCN, strain, type, prepost:extype) %>%
+  ggplot(aes(x = ReleaseDate, y = PCN, color = extype)) +
+  geom_point()
+```
+
+```{r}
+b3 %>%
+  select(Experiment, Run, BioProject, ReleaseDate) %>%
+  right_join(setMCex, by = c("Experiment" = "sample",
+                             "BioProject")) %>%
+  select(-Run) %>%
+  distinct() %>%
+  select(Experiment: ReleaseDate, Instrument, year,
+         PCN, strain, type, prepost:extype) %>%
+  ggplot(aes(x = as.numeric(year), y = ReleaseDate)) +
+  geom_hex()
+```
+
+```{r}
+b3 %>%
+  select(Experiment, Run, BioProject, ReleaseDate) %>%
+  right_join(setMCex, by = c("Experiment" = "sample",
+                             "BioProject")) %>%
+  select(-Run) %>%
+  distinct() %>%
+  select(Experiment: ReleaseDate, Instrument, year,
+         PCN, strain, type, prepost:extype) %>%
+  filter(extype == "silica" &
+           Instrument == "Illumina HiSeq 2000") %>%
+  ggplot(aes(x = ReleaseDate, y = PCN,
+             color = BioProject)) +
+  geom_point()
+```
+There appears to be an effect of BioProject if we ctl for extraction technique & instrument and just plot releasedate on x axis
+this is likely explained by year of collection...
+
+```{r}
+b3 %>%
+  select(Experiment, Run, BioProject, ReleaseDate) %>%
+  right_join(setMCex, by = c("Experiment" = "sample",
+                             "BioProject")) %>%
+  select(-Run) %>%
+  distinct() %>%
+  select(Experiment: ReleaseDate, Instrument, year,
+         PCN, strain, type, prepost:extype) %>%
+  filter(extype == "silica" &
+           Instrument == "Illumina HiSeq 2000") %>%
+  ggplot(aes(x = as.numeric(year), y = PCN,
+             color = BioProject)) +
+  geom_point()
+```
+yeah it is because they were collected earlier it sure seems
+
+let's check strain
+
+```{r}
+b3 %>%
+  select(Experiment, Run, BioProject, ReleaseDate) %>%
+  right_join(setMCex, by = c("Experiment" = "sample",
+                             "BioProject")) %>%
+  select(-Run) %>%
+  distinct() %>%
+  select(Experiment: ReleaseDate, Instrument, year,
+         PCN, strain, type, prepost:extype) %>%
+  filter(extype == "silica" &
+           Instrument == "Illumina HiSeq 2000") %>%
+  ggplot(aes(x = as.numeric(year), y = PCN,
+             color = strain)) +
+  geom_point()
+```
+IT IS NOT DUE TO STRAIN BACKGROUND!!!!! we can just look at strain 2
+
+```{r}
+b3 %>%
+  select(Experiment, Run, BioProject, ReleaseDate) %>%
+  right_join(setMCex, by = c("Experiment" = "sample",
+                             "BioProject")) %>%
+  select(-Run) %>%
+  distinct() %>%
+  select(Experiment: ReleaseDate, Instrument, year,
+         PCN, strain, type, prepost:extype) %>%
+  filter(extype == "silica" &
+           Instrument == "Illumina HiSeq 2000" &
+           strain == "S99.5_2") %>%
+  ggplot(aes(x = as.numeric(year), y = PCN,
+             color = BioProject,
+             shape = centername)) +
+  geom_point()
+```
+ALL SEQUENCED AT SC!!!!!!!
+
+### looking at plots again
+```{r year of collection x pcn; color extraction shape instrument}
+setMCex %>%
+  ggplot(aes(x = as.numeric(year), y = PCN, color = extype,
+             shape = Instrument)) +
+  geom_point()
+```
+
+```{r}
+setMCex %>%
+  filter(year > 1995) %>%
+  ggplot(aes(x = as.numeric(year), y = PCN, color = extype,
+             shape = Instrument)) +
+  geom_point()
+```
+
+```{r}
+setMCex %>%
+  filter(year < 1995) %>%
+  ggplot(aes(x = as.numeric(year), y = PCN, color = extype,
+             shape = Instrument)) +
+  geom_point()
+
+setMCex %>%
+  filter(year < 1995) %>%
+  ggplot(aes(x = as.numeric(year), y = PCN, color = centername,
+             shape = strain)) +
+  geom_point()
+```
+
+looking at strain 2, sanger center, silica extraction, hiseq 2000 samples
+```{r}
+setMCex %>%
+  filter(strain == "S99.5_2",
+         centername == "SC",
+         extype == "silica",
+         Instrument == "Illumina HiSeq 2000"
+       ) %>%
+  ggplot(aes(x = as.numeric(year), y = PCN, color = BioProject
+             )) +
+  geom_point()
+```
+definitely a decline
+run regression to confirm
+
+```{r regression on all same technique strain 2}
+strain2_sc_silica_2k <- setMCex %>%
+  filter(strain == "S99.5_2",
+         centername == "SC",
+         extype == "silica",
+         Instrument == "Illumina HiSeq 2000"
+       )
+
+strain2_sc_silica_2k
+
+s2scsi2k <- lm(PCN ~ as.numeric(year), strain2_sc_silica_2k)
+summary(s2scsi2k)
+```
+
+```{r min max year for same collection mechanism}
+min(strain2_sc_silica_2k$year)
+max(strain2_sc_silica_2k$year)
+```
+
+
+```{r}
+b3 %>%
+  select(Experiment, Run, BioProject, ReleaseDate) %>%
+  right_join(setMCex, by = c("Experiment" = "sample",
+                             "BioProject")) %>%
+  select(-Run) %>%
+  distinct() %>%
+  select(Experiment: ReleaseDate, Instrument, year,
+         PCN, strain, type, prepost:extype) %>%
+  filter(extype == "silica" &
+           Instrument == "Illumina HiSeq 2000",
+         strain == "S99.5_2") %>%
+  ggplot(aes(x = ReleaseDate, y = PCN,
+             color = BioProject)) +
+  geom_point()
+```
+looks like there's no impact of release date
+
+```{r check for significance in greatly reduced set}
+s2silica <- b3 %>%
+  select(Experiment, Run, BioProject, ReleaseDate) %>%
+  right_join(setMCex, by = c("Experiment" = "sample",
+                             "BioProject")) %>%
+  select(-Run) %>%
+  distinct() %>%
+  select(Experiment: ReleaseDate, Instrument, year,
+         PCN, strain, type, prepost:extype) %>%
+  filter(strain == "S99.5_2",
+         centername == "SC",
+         extype == "silica",
+         Instrument == "Illumina HiSeq 2000"
+       )
+
+lm.silica.collection <- lm(PCN ~ as.numeric(year)*BioProject, data = s2silica)
+lm.silica.release <- lm(PCN ~ ReleaseDate*BioProject, data = s2silica)
+
+summary(lm.silica.collection)
+summary(lm.silica.release)
+
+s2silica %>%
+  arrange(desc(ReleaseDate
+          ))
+```
+But we CAN'T do control for bioproject because obviously all the old samples are on the same one
+
+let's go back to the 3 bioprojects that cross the 1995 line
+
+### effect of extraction technique
+```{r}
+b3 %>%
+  select(Experiment, Run, BioProject, ReleaseDate) %>%
+  right_join(setMCex, by = c("Experiment" = "sample",
+                             "BioProject")) %>%
+  select(-Run) %>%
+  distinct() %>%
+  select(Experiment: ReleaseDate, Instrument, year,
+         PCN, strain, type, prepost:extype) %>%
+  filter(extype == "silica",
+         strain == "S99.5_2") %>%
+  ggplot(aes(x = as.numeric(year), y = PCN,
+             color = centername,
+             shape = BioProject)) +
+  geom_point()
+```
+
+```{r}
+b3 %>%
+  select(Experiment, Run, BioProject, ReleaseDate) %>%
+  right_join(setMCex, by = c("Experiment" = "sample",
+                             "BioProject")) %>%
+  select(-Run) %>%
+  distinct() %>%
+  select(Experiment: ReleaseDate, Instrument, year,
+         PCN, strain, type, prepost:extype) %>%
+#  filter(strain == "S99.5_2",
+ #        year > 1995) %>%
+  ggplot(aes(x = as.numeric(year), y = PCN,
+             #color = centername,
+             color = extype,
+             #shape = BioProject
+             shape = Instrument)) +
+  geom_point()
+```
+
+```{r}
+b3 %>%
+  select(Experiment, Run, BioProject, ReleaseDate) %>%
+  right_join(setMCex, by = c("Experiment" = "sample",
+                             "BioProject")) %>%
+  select(-Run) %>%
+  distinct() %>%
+  select(Experiment: ReleaseDate, Instrument, year,
+         PCN, strain, type, prepost:extype) %>%
+  filter(year > 1995) %>%
+  ggplot(aes(x = as.numeric(year), y = PCN,
+             #color = centername,
+             color = extype,
+             #shape = BioProject
+             shape = Instrument)) +
+  geom_point()
+```
+
+```{r histogram extraction type pcn by strain}
+b3 %>%
+  select(Experiment, Run, BioProject, ReleaseDate) %>%
+  right_join(setMCex, by = c("Experiment" = "sample",
+                             "BioProject")) %>%
+  select(-Run) %>%
+  distinct() %>%
+  select(Experiment: ReleaseDate, Instrument, year,
+         PCN, strain, type, prepost:extype) %>%
+  filter(year > 1995) %>%
+  group_by(strain) %>%
+  mutate(straincount = n()) %>%
+  filter(straincount > 1) %>%
+  ungroup() %>%
+  ggplot(aes(x = PCN,
+             fill = extype
+             )) +
+  geom_histogram() +
+  facet_wrap(~strain)
+```
+
+```{r box plot extraction type pcn by strain}
+b3 %>%
+  select(Experiment, Run, BioProject, ReleaseDate) %>%
+  right_join(setMCex, by = c("Experiment" = "sample",
+                             "BioProject")) %>%
+  select(-Run) %>%
+  distinct() %>%
+  select(Experiment: ReleaseDate, Instrument, year,
+         PCN, strain, type, prepost:extype) %>%
+  filter(year > 1995) %>%
+  group_by(strain) %>%
+  mutate(straincount = n()) %>%
+  filter(straincount > 1) %>%
+  ungroup() %>%
+  ggplot(aes(x = strain,
+             y = PCN,
+             fill = extype
+             )) +
+  geom_boxplot() 
+```
+
+
+```{r}
+excheck <- b3 %>%
+  select(Experiment, Run, BioProject, ReleaseDate) %>%
+  right_join(setMCex, by = c("Experiment" = "sample",
+                             "BioProject")) %>%
+  select(-Run) %>%
+  distinct() %>%
+  select(Experiment: ReleaseDate, Instrument, year,
+         PCN, strain, type, prepost:extype) %>%
+  filter(year > 1995) %>%
+  group_by(strain) %>%
+  mutate(straincount = n()) %>%
+  filter(straincount > 1) %>%
+  
+
+exT = glmmTMB(PCN ~ as.numeric(year) + extype + strain, data = excheck,
+             family = Gamma(link="log"))
+summary(exT)
+```
+don't actually need a glmm for this...
+no random effects
+
+```{r regression for strain and extraction technique}
+excheckM <- lm(PCN ~ strainFac + extype, data = excheck)
+summary(excheckM)
+```
+
+```{r}
+excheck %>%
+  ggplot(aes(x = PCN)) +
+  geom_histogram()
+```
+
+## investigating S99.5_27 2009-ish peak
+```{r}
+set2.5backup %>%
+  filter(year > 2007 &
+           year < 2011) %>%
+  filter(strain == "S99.5_27") %>%
+  count(BioProject)
+```
+PRJEB4140 has 1k+ isolates
+what are they up to?
+
+```{r}
+set2.5backup %>%
+  filter(BioProject == "PRJEB4140") %>% # 1083 isolates
+  ggplot(aes(x #= as.numeric(year), y 
+             = PCN)) +
+  #geom_point()
+  geom_histogram()
+```
+all isolates in PRJEB4140 were collected in 2008
+They are all single copy
+
+Strain 27 was excluded and rerun in original manuscript
+
+# returning to glmm
+exclude strain 2 and rerun
+
+```{r oe5 without strain 2}
+oe5no2 <- oe5 %>%
+  filter(strain != "S99.5_2")
+```
+
+```{r glmm for time and strain without strain 2}
+m22 = glmmTMB(PCN ~ numYear + strainFac +
+                (1|strainFac:BioProject) +
+                (1|numYear:BioProject), # AIC is lower with them both included 
+        data = oe5no2,
+             family = Gamma(link="log"))
+summary(m22)
+```
+relationship with numYear still significant
+
+what does the distribution of years look like in this new dataset
+```{r}
+oe5no2 %>%
+  ggplot(aes(x = numYear, y = PCN, color = strainFac)) +
+  geom_point() +
+  geom_smooth(method = "lm")
+```
+
+```{r year range for non-s2 oe5}
+summary(oe5no2$numYear)
+```
+without strain 2 and reducing to only bioprojects with 5+ samples
+year range is small, 2003-2017, mostly sampled 2015+
+
+the relationship is still significant and negative, even looking at this small range
+just not as significant and negative
