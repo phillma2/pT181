@@ -1,0 +1,135 @@
+---
+title: "snpdists-comparison"
+author: "Megan Phillips"
+date: "2026-08-11"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+```{r loading snpdist output}
+aln_dist <- read_delim("ska.noref.dist.tsv", 
+    delim = "\t", escape_double = FALSE, 
+    trim_ws = TRUE) %>%
+  rename("seq1" = "snp-dists 0.8.2") %>%
+  column_to_rownames(var = "seq1")
+
+map_dist <- read_delim("ska.ref.dist.tsv", 
+    delim = "\t", escape_double = FALSE, 
+    trim_ws = TRUE) %>%
+  rename("seq1" = "snp-dists 0.8.2") %>%
+  column_to_rownames(var = "seq1")
+```
+
+
+```{r aln matrix & long}
+# Convert to matrix
+aln_dist_m <- as.matrix(aln_dist)
+
+# Extract upper triangle
+aln_uppertri <- which(upper.tri(aln_dist_m), arr.ind = TRUE)
+
+long_aln_df <- data.frame(
+  sample1 = rownames(aln_dist_m)[aln_uppertri[, 1]],
+  sample2 = colnames(aln_dist_m)[aln_uppertri[, 2]],
+  snpdist.aln = aln_dist_m[upper.tri(aln_dist_m)]
+)
+# no duplicates or self-comparisons
+
+long_aln_df
+```
+
+```{r map matrix & long}
+# Convert to matrix
+map_dist_m <- as.matrix(map_dist)
+
+# Extract upper triangle
+map_uppertri <- which(upper.tri(map_dist_m), arr.ind = TRUE)
+
+long_map_df <- data.frame(
+  sample1 = rownames(map_dist_m)[map_uppertri[, 1]],
+  sample2 = colnames(map_dist_m)[map_uppertri[, 2]],
+  snpdist.map = map_dist_m[upper.tri(map_dist_m)]
+)
+# no duplicates or self-comparisons
+
+long_map_df
+```
+
+
+now to compare the outputs...
+
+```{r}
+compdf <- inner_join(long_map_df, long_aln_df,
+           by = c("sample1", "sample2"))
+
+compdf
+```
+yes okay we get 31,900,078 rows which is correct
+
+```{r plot aln vs map snps}
+compdf %>%
+  ggplot(aes(x = snpdist.map, y = snpdist.aln)) +
+  geom_hex() +
+  geom_abline(intercept = 0, slope = 1, color = "darkorange",
+              linewidth = 1) +
+  geom_smooth(method = "lm")
+```
+
+# testing: are they distributed the same?
+```{r wilcox}
+wilcox.test(compdf$snpdist.map, compdf$snpdist.aln,
+            paired = TRUE,
+            alternative = "two.sided")
+```
+they are significantly different by wilcoxon signed rank test
+
+
+```{r}
+summary(compdf$snpdist.map - compdf$snpdist.aln)
+```
+
+the majority of pairs are the same by the 2 methods
+
+```{r difference histogram}
+compdf %>%
+  ggplot(aes(x = snpdist.map - snpdist.aln)) +
+  geom_histogram(binwidth = 1)
+```
+Median: same snp count
+average: map < aln
+
+RESULT: mapping to reference VERSUS reference-free alignment does not dramatically change our characterization of the plasmid
+
+# compared to the reference genome
+DRX100326
+
+```{r get dist to ref for both methods}
+DRX100326match_aln <- aln_dist_m %>%
+    .[grep("DRX100326", rownames(.)), ] %>%
+  as.data.frame() %>%
+  rownames_to_column("isolate") %>%
+  rename("snpdist_aln" = ".")
+
+DRX100326match_map <- map_dist_m %>%
+    .[grep("DRX100326", rownames(.)), ] %>%
+  as.data.frame() %>%
+  rownames_to_column("isolate") %>%
+  rename("snpdist_map" = ".")
+```
+
+```{r}
+disttoref <- full_join(DRX100326match_aln, DRX100326match_map,
+                       by = "isolate") %>%
+  mutate(alnlarger = snpdist_aln - snpdist_map)
+disttoref
+```
+
+```{r}
+disttoref %>%
+  ggplot(aes(x = alnlarger)) +
+  geom_histogram()
+```
