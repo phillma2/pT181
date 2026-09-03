@@ -1,5 +1,5 @@
 # pT181
-Repo for code associated with pT181 project (Phillips et al. 2025, bioRxiv) - https://www.biorxiv.org/content/10.1101/2025.09.14.675889v1
+Repo for code associated with pT181 project (Phillips et al. 2026, eLife) - [https://www.biorxiv.org/content/10.1101/2025.09.14.675889v1](https://elifesciences.org/reviewed-preprints/109393v1)
 "Transition of Staphylococcus aureus tetracycline resistance plasmid pT181 from independent multicopy replicon to predominantly integrated chromosomal element over 65 years"
 
 All genomes used in this study are publicly available
@@ -44,6 +44,7 @@ filesforR
 - allthebacteria-sccmec.tsv - output from sccmec tool run on AtB
 - pubmet-* - metadata for SRA runs
 - 14.description.ncbi.txt - description for 14 pT181+ complete genomes
+- snpdists-comparison.Rmd - Rmd to compare snp-dists output for SKA reference-free vs mapped alignments
 
 ## additional files found elsewhere
 - staphopia_v2_all_report.txt in Zenodo for Raghuram et al. 2024 msystems 
