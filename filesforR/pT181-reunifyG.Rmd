@@ -755,30 +755,36 @@ fig2mutplot
 
 Let's look at the gene plot
 ```{r Fig. 2 gene plot}
-baktaRef1 <- data.frame(
-  Type = c("cds", "sorf", "cds", "cds", "oriC", "cds", "ncRNA", "cds"),
-  Start = c(0, 862, 956, 2521, 3763, 3948, 4100, 4289),
-  Stop = c(794, 912, 2335, 3762, 4288, 4049, 4194, 4439)
-)
+x_limits <- c(0, 4439)
+x_breaks <- seq(0, 4439, by = 500)
 
 baktaRef2 <- data.frame(
-  Type = c("repC", "sorf", "tetK", "pre", "oriC", "cds", "ncRNA", "repC"),
-  Start = c(0, 862, 956, 2521, 3763, 3948, 4100, 4289),
-  Stop = c(794, 912, 2335, 3762, 4288, 4049, 4194, 4439)
+  Type   = c("repC", "sorf", "tetK", "pre", "oriC", "cds", "ncRNA", "repC"),
+  Start  = c(0, 862, 956, 2521, 3763, 3948, 4100, 4289),
+  Stop   = c(794, 912, 2335, 3762, 4288, 4049, 4194, 4439),
+  Strand = c("+", "+", "+", "+", "?", "+", "-", "+")
 )
+baktaRef2$length  <- baktaRef2$Stop - baktaRef2$Start
+baktaRef2$forward <- baktaRef2$Strand == "+"
 
-baktaRef2$length <- baktaRef2$Stop - baktaRef2$Start
+genes   <- subset(baktaRef2, Type != "oriC")
+originF <- subset(baktaRef2, Type == "oriC")
 
-geneplot <- ggplot(baktaRef2, aes(xmin = Start, xmax = Stop, y = "pT181",
-                                 fill = Type)) +
+geneplot_rev <- ggplot(genes, aes(xmin = Start, xmax = Stop,
+                                  y = "pT181",
+                              fill = Type, forward = forward)) +
+  geom_rect(data = originF,
+            aes(xmin = Start, xmax = Stop, ymin = -Inf, ymax = Inf),
+            inherit.aes = FALSE, fill = "grey80", alpha = 0.6) +
   geom_gene_arrow() +
-  #geom_gene_label() +
-  #facet_wrap(~ molecule, scales = "free", ncol = 1) +
   scale_fill_brewer(palette = "Set3") +
-  theme(legend.position="none") +
-  theme_bw()
+  scale_x_continuous() +
+  theme_bw() +
+  theme(legend.position = "none",
+        axis.title.y = element_blank()) +
+  labs(x = "Plasmid Position (bp)")
 
-geneplot
+geneplot_rev
 ```
 
 ## checking on 1954 isolate (& others)
