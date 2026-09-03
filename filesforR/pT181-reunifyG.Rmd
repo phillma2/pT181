@@ -18,7 +18,7 @@ library(forcats)
 library(gggenes)
 library(ez)
 library(DescTools)
-library(ggpubfigs)
+#library(ggpubfigs)
 library(ggpubr)
 library(FSA)
 library(ggstream)
@@ -109,9 +109,9 @@ all86k$CC %>%
   table()
 ```
 
-import Vishnu's strain groups
 ```{r import strain}
-vstraingroup <- read_delim("isolate_substrain_strain_freq_st_CC.tsv", 
+#vstraingroup <- read_delim("isolate_substrain_strain_freq_st_CC.tsv", 
+vstraingroup <- read_delim("~/Desktop/Read_Lab/isolate_substrain_strain_freq_st_CC.tsv", 
     delim = "\t", escape_double = FALSE, 
     trim_ws = TRUE)
 ```
@@ -128,9 +128,10 @@ all86k %>%
 
 let's get the 337 complete genomes that start with dnaA
 ```{r load dnaA-1st complete genomes}
-dnaA_start_coords <- read_delim("fromV2git/timsfigsData/dnaA_start_coords.gfs", 
-    delim = "\t", escape_double = FALSE, 
-    trim_ws = TRUE)
+#dnaA_start_coords <- read_delim("fromV2git/timsfigsData/dnaA_start_coords.gfs", 
+dnaA_start_coords <- read_delim("~/Desktop/Read_Lab/fromV2git/timsfigsData/dnaA_start_coords.gfs",
+                                delim = "\t", escape_double = FALSE,
+                                trim_ws = TRUE)
 
 #info on the 14 integrated complete dnaA-1st
 X14_description_ncbi <- read_delim("14.description.ncbi.txt", 
@@ -438,7 +439,9 @@ df2$Experiment <- df2$SAMPLE %>%
 
 ### binning identical samples
 ```{r}
-js <- left_join(set2.5backup, df2, by = c("sample" = "Experiment")) %>%
+#js <- left_join(set2.5backup, df2,
+js <- left_join(set2.5, df2,
+                by = c("sample" = "Experiment")) %>%
   select(sample, strain, PCN, year, issinglecopy, prepost, POS:ALT)
 js$allele <- paste0(js$POS, "-", js$TYPE, "-", js$REF, "-", js$ALT)
 
@@ -451,7 +454,7 @@ jss %>%
   distinct() # 229 unique plasmid sequences
 ```
 
-```{r Fig. 8: plotting alleles x PCN}
+```{r genetic diversity in early samples}
 left_join(jss, js) %>%
   select(sample, PCN, strain, plasAllele, year, prepost) %>%
   distinct() %>%
@@ -462,14 +465,14 @@ left_join(jss, js) %>%
   filter(PCN > 2) %>%
   filter(prepost == "pre") %>%
   ggplot(aes(x = plasAllele, y = PCN, color = strain)) +
-  #geom_violin() +
   geom_point() +
   scale_y_sqrt()
+```
+there's not just one allele in the early samples generating the high PCN
 
-# there's not just one allele in the early samples generating the high PCN
-
+```{r Fig. 8: plotting alleles x PCN}
 ### fig. 8 plot
-left_join(jss, js) %>%
+plot8 <- left_join(jss, js, by = c("sample", "PCN")) %>%
   select(sample, PCN, strain, plasAllele, year, prepost) %>%
   distinct() %>%
   group_by(plasAllele) %>%
@@ -477,16 +480,27 @@ left_join(jss, js) %>%
   ungroup() %>%
   filter(count > 2) %>%
   filter(PCN > 2) %>%
-  ggplot(aes(x = forcats::fct_reorder(plasAllele, PCN, .fun = median), y = PCN, color = strain)) +
+  ggplot(aes(x = forcats::fct_reorder(plasAllele, PCN, .fun = median),
+             y = PCN, color = strain)) +
   geom_point() +
-  scale_y_sqrt() +
-  theme_bw() +
-  theme(axis.text.x = element_blank(),
-  axis.ticks = element_blank()) +
+#  scale_y_sqrt() +
+#  scale_y_sqrt(breaks = c(12.5, 25, 50, 100, 150, 200)) +
+  #scale_y_sqrt(breaks = c(15, 30, 50, 100, 150, 200),
+  scale_y_sqrt(breaks = c(5, 15, 30, 50, 100, 150, 200),
+               minor_breaks = NULL) +
+  theme_bw(base_size = 16) +
+  theme(
+    axis.text.x = element_blank(),
+    axis.ticks.x = element_blank()) +
   scale_color_manual(values = allele.pallete) +
   xlab("Plasmid Allele")
+plot8
 
-left_join(jss, js) %>%
+build <- ggplot_build(plot8)
+build$layout$panel_params[[1]]$y$breaks # major / labeled
+build$layout$panel_params[[1]]$y$minor_breaks
+
+left_join(jss, js, by = c("sample", "PCN")) %>%
   select(sample, PCN, strain, plasAllele, year, prepost) %>%
   distinct() %>%
   group_by(plasAllele) %>%
@@ -500,6 +514,22 @@ left_join(jss, js) %>%
 # 18 strains -- did not bin for "Other"
 # make "otherless + no 27" palette
 ```
+
+```{r}
+left_join(jss, js, by = c("sample", "PCN")) %>%
+  select(sample, PCN, strain, plasAllele, year, prepost) %>%
+  distinct() %>%
+  group_by(plasAllele) %>%
+  mutate(count = n()) %>%
+  ungroup() %>%
+  filter(count > 2) %>%
+  filter(PCN > 2) %>%
+  distinct(plasAllele)
+```
+for fig. 8
+36 different variants in this dataset
+we are excluding unique plasmids
+we are excluding single copy
 
 ```{r identical plasmids: single & multicopy}
 left_join(jss, js) %>%
@@ -670,7 +700,7 @@ df3 %>%
   theme_bw()
 ```
 
-```{r combining Fig. 2A & B}
+```{r where are the mutations?}
 df2 %>%
   select(POS, TYPE, ALT) %>% # for all samples with mut, what is allele & type at each site?
   distinct() %>% # distinct mutations (we don't need to know sample count) -- 680 rows
@@ -680,38 +710,48 @@ df2 %>%
   distinct() %>% 
   ggplot(aes(x = as.numeric(POS), y = countPT, #color = TYPE, 
              fill = TYPE)) +
-  geom_col(width = 10,
+  geom_col(width = 10, # to make it visible -- this is NOT real binwidth for counting
            position = "stack") +
-  #geom_bar(width = 1) +
   theme_bw() +
   labs(y = "# Alt Alleles",
        x = "Plasmid Position",
        fill = "Mutation type")
-
-# think about how we want to represent this / the axes. what is this?
-# need to learn or establish the binwidth / width for these!!!!
 ```
+warning: 	
+position_stack requires non-overlapping x intervals
+modify code to create real binwidth -- group mut into 10bp window
 
-```{r Fig. 2 with 10bp binwidth}
-df2 %>%
-  select(POS, TYPE, ALT) %>% # for all samples with mut, what is allele & type at each site?
-  distinct() %>% # distinct mutations (we don't need to know sample count) -- 680 rows
-  mutate(POSn = str_replace(POS, "\\d(?=\\D*$)", "0"))%>%
-  select(POSn, TYPE, ALT) %>%
+```{r fig. 2 revision plot: alt alleles with black underline}
+# hypervariable region positions for plot
+hypervar <- data.frame(
+#  xstart = c(814, 2460, 4133), # real start position
+  xstart = c(810, 2460, 4130), # because binwidth = 10 anyway
+#  xend = c(817, 2466, 4313), # real end position
+  xend = c(820, 2470, 4320), # because binwidth = 10 anyway
+  y = c(-0.5, -0.5, -0.5)
+)
+
+# fig 2 alt allele plot
+fig2mutplot <- df2 %>%
+  dplyr::select(POS, TYPE, ALT) %>%
+  distinct() %>% # count each allele at each position once
+  mutate(POSn = str_replace(POS, "\\d(?=\\D*$)", "0")) %>% # get the 10bp-rounding
   group_by(POSn, TYPE) %>%
-  mutate(countTYPEPOSn = n()) %>%
-  distinct() %>%
-  ggplot(aes(x = as.numeric(POSn), #y = countPT, #color = TYPE, 
-             fill = TYPE)) +
-  geom_bar(position = "stack") +
+  mutate(TypeCountPOSn = n()) %>% # get count of alt of each type in each bin
+  distinct(POSn, TypeCountPOSn, TYPE) %>% # dereplicate
+  ggplot(aes(x = as.numeric(POSn), y = TypeCountPOSn, fill = TYPE)) +
+  geom_col(position = "stack") +
+  theme_bw() +
+  geom_segment(data = hypervar,
+               aes(x = xstart, xend = xend, y = y, yend = y),
+               inherit.aes = FALSE,
+               linewidth = 1.5, color = "black") +
   theme_bw() +
   labs(y = "# Alt Alleles",
        x = "Plasmid Position (10bp binwidth)",
        fill = "Mutation type")
+fig2mutplot
 ```
-ALSO need a plot with the genes
-
-
 
 Let's look at the gene plot
 ```{r Fig. 2 gene plot}
@@ -735,9 +775,10 @@ geneplot <- ggplot(baktaRef2, aes(xmin = Start, xmax = Stop, y = "pT181",
   #geom_gene_label() +
   #facet_wrap(~ molecule, scales = "free", ncol = 1) +
   scale_fill_brewer(palette = "Set3") +
-  theme(legend.position="none")
+  theme(legend.position="none") +
+  theme_bw()
 
-geneplot + theme_bw()
+geneplot
 ```
 
 ## checking on 1954 isolate (& others)
@@ -763,7 +804,8 @@ We now know that there are significant insertions/deletions occurring in the pla
 We need to revisit the output to estimate a mutation rate, or more accurately, snp accumulation rate in coding regions (CDS)
 
 ```{r making snp datasets}
-snpSet <- left_join(set2.5backup, df2, by = c("sample" = "Experiment")) %>% 
+#snpSet <- left_join(set2.5backup, df2, by = c("sample" = "Experiment")) %>% 
+snpSet <- left_join(set2.5, df2, by = c("sample" = "Experiment")) %>% 
   # no need to filter cloning vectors since we are just going with HQ SA samples
   filter(POS <= 794 | # filtering for CDS only
            POS >= 4323 |
@@ -776,7 +818,8 @@ snpSet <- left_join(set2.5backup, df2, by = c("sample" = "Experiment")) %>%
   mutate(SNPcount = n()) %>%
   select(sample, SNPcount)
 
-cdsSNP <- left_join(set2.5backup, snpSet) %>%
+#cdsSNP <- left_join(set2.5backup, snpSet) %>%
+cdsSNP <- left_join(set2.5, snpSet) %>%
   replace_na(list(SNPcount = 0)) %>%
   select(sample, year, SNPcount, PCN, issinglecopy, strain, type) %>%
   distinct()
@@ -784,14 +827,24 @@ cdsSNP <- left_join(set2.5backup, snpSet) %>%
 
 Recreating figures using new metrics (SNPs, instead of all mutation types)
 ```{r Fig. 3: snp figs}
-ggplot(data = cdsSNP, aes(x = as.numeric(year), y = SNPcount)) +
+# snp points
+fig3 <- ggplot(data = cdsSNP, aes(x = as.numeric(year), y = SNPcount)) +
   #geom_point() +
   geom_jitter(width = 0.3, height = 0.05) +
   geom_smooth(method = "lm", se = TRUE) +
-  theme_bw() +
+    # making text size bigger
+  theme_bw(base_size = 16) +
   labs(x = "Year of Collection",
-       y = "CDS SNP count")
+       y = "Coding sequence SNP count") #+
+  # making text size bigger
+#  theme(
+ #   axis.title.x = element_text(size = 14),
+  #  axis.title.y = element_text(size = 14)
+#  )
+fig3
+```
 
+```{r snp bar chart by decade}
 cdsSNP$SNPcountFct <- factor(cdsSNP$SNPcount, levels=c('4', '3', '2', '1', '0'))
 
 cdsSNP %>%
@@ -805,6 +858,7 @@ cdsSNP %>%
   theme_bw() +
   scale_fill_manual(values = c25)
 ```
+
 
 ### how many sites have more than 1 allele (aka any snippy output)?
 ```{r}
@@ -969,13 +1023,17 @@ cdslen <- (4439 - 4323) + (4049 - 3948) + (3762 - 2521) + (2335 - 956) + (912 - 
 
 ```{r}
 # 0.004234 cds snps / year in pT181
-0.004234 / 3681
+0.004234 / 3681 # slope
+0.001106 / 3681 # se
 ```
 1.150231e-06 snps/bp/year --> 1.15 SNP/Mbp/year 
 this is on the lower end compared to other estimates, but nothing too out-there
 
+0.3 SNP/Mb/year
 
-Now that we are looking at just the SNPs, more strains jump out as having different amounts!
+
+Now that we are looking at just the SNPs,
+more strains jump out as having different amounts!
 Let's plot, looking at strain, SC vs not, etc
 
 ```{r}
@@ -1045,19 +1103,33 @@ loading in stuff that has been averaged across contig for all strains
 ```{r load depths and gene positions}
 # avg depth for each contig for non-straggler samples
 avgdepths <- read_table2("20231222/cleaned_avgdepths.txt", col_names = FALSE)
+# old path
+# avgdepths <- read_table2("20231222/cleaned_avgdepths.txt", col_names = FALSE)
+# new path
+avgdepths <- read_table2("depth+geneID/cleaned_avgdepths.txt", col_names = FALSE)
 avgdepths <- avgdepths %>% rename("Experiment" = "X1", "contig" = "X2",
                                   "avgDepth" = "X3")
 
 #straggler depths here
-stragglercleaned <- read_table2("straggler.cleaned.avgdepth", 
-    col_names = FALSE)
-stragglercleaned <- stragglercleaned %>% rename("Experiment" = "X1", "contig" = "X2",
-                                  "avgDepth" = "X3")
+# old path
+#stragglercleaned <- read_table2("straggler.cleaned.avgdepth",
+#    col_names = FALSE)
+# new path
+stragglercleaned <- read_table2("depth+geneID/straggler.cleaned.avgdepth", 
+                                col_names = FALSE)
+
+stragglercleaned <- stragglercleaned %>%
+  rename("Experiment" = "X1", "contig" = "X2", "avgDepth" = "X3")
 
 #lawful+tetK contigs
 #tetK = g00000
-geneID <- read_table2("20231222/geneID-forR.txt", 
-    col_names = FALSE)
+
+# old path
+#geneID <- read_table2("20231222/geneID-forR.txt", 
+  #  col_names = FALSE)
+#new path
+geneID <- read_table2("depth+geneID/geneID-forR.txt", 
+                      col_names = FALSE)
 geneID <- geneID %>% rename("gene" = "X1", "Experiment" = "X2",
                             "contig" = "X3")
 
@@ -1159,17 +1231,19 @@ cowplot::plot_grid(pcnA, pcnB, pcnC, ncol = 3)
 # all PCN
 pcnAb <- ggplot(data = pcn.notNA1, mapping = aes(x = PCN)) +
   geom_histogram(binwidth = 1) +
-  theme_bw() +
-  scale_x_sqrt()
+  theme_bw(base_size = 16) +
+  scale_x_sqrt(breaks = c(5, 15, 30, 50, 100, 150, 200),
+               minor_breaks = NULL)
 
 # PCN =< 3
 pcnCb <- pcn.notNA1 %>%
   filter(PCN <= 3) %>%
   ggplot(mapping = aes(x = PCN)) +
   geom_histogram(binwidth = 0.01) +
-  theme_bw()
+  theme_bw(base_size = 16)
 
-cowplot::plot_grid(pcnAb, pcnCb, ncol = 2)
+fig4 <- cowplot::plot_grid(pcnAb, pcnCb, ncol = 2)
+fig4
 ```
 
 get non-single copy stats
@@ -1344,20 +1418,22 @@ set2.5 %>%
 
 ## fig. 6B
 ```{r figure: sc x strain (Fig. 6B)}
-set2.5Schi %>%
+fig6b <- set2.5Schi %>%
   filter(`TRUE`+`FALSE` > 1) %>%
   mutate(ratio = `TRUE`/`FALSE`) %>%
-  left_join(., set2.5backup, by = "strain") %>%
+  #left_join(., set2.5backup, by = "strain") %>%
+  left_join(., set2.5, by = "strain") %>%
   ggplot(aes(x = forcats::fct_reorder(strain, ratio, .fun = median),
          fill = issinglecopy)) +
   geom_bar(position = "fill")  +
-  theme_bw() +
+  theme_bw(base_size = 16) +
   theme(axis.text.x = element_text(angle = 90)) +
   labs(x = "Strain",
        y = "Proportion of Samples",
        fill = "PCN") +
   scale_fill_manual(values = c25,
                     labels = c("multicopy", "single-copy"))
+fig6b
 ```
 
 # where is the 1990s sampling gap?
@@ -1377,20 +1453,23 @@ staph is continuously collected still
 
 # PCN for type III SCCmec
 ```{r type iii stats}
-set2.5backup %>%
+# set2.5backup %>%
+set2.5 %>%
   filter(type == "III") %>%
   select(PCN) %>%
   summary()
 ```
 
 ```{r strain27 info}
-set2.5backup %>%
+#set2.5backup %>%
+set2.5 %>%
   filter(issinglecopy == T) %>% # 1,863 rows
   filter(strain == "S99.5_27") # 1,131 rows
 ```
 
 ```{r what sccmec types s27}
-set2.5backup %>%
+#set2.5backup %>%
+set2.5 %>%
   filter(strain == "S99.5_27") %>%
   select(mecA, type) %>%
   distinct()
@@ -1532,14 +1611,22 @@ findOri$nearOri <- with(findOri, ifelse(gene == "g03298" |
 I think the NAs have been generated by the join.
 
 ```{r Fig. 11 chrom plot near origin vs not}
-findOri %>%
+fig11 <- findOri %>%
   select(-gene) %>%
   filter(!is.na(nearOri)) %>% #only stuff that had an identifiable gene
   distinct() %>% # de-replicate contigs
   filter(CCN < 3) %>% # for readability
   ggplot(aes(x = CCN, fill = nearOri)) +
   geom_histogram() +
-  theme_bw()
+  theme_bw(base_size = 16) + # increase all text size
+  labs(fill = "Near origin",
+       x = "Chromosomal Copy Number (CCN)") #+
+  # making text size bigger
+  #theme(
+  #  axis.title.x = element_text(size = 14),
+  #  axis.title.y = element_text(size = 14)
+  #)
+fig11
 ```
 
 
@@ -1629,7 +1716,7 @@ A: pT181 P/A
 B: pT181 isolates by strain
 
 ```{r Fig. 1}
-all86k %>%
+fig1a <- all86k %>%
   filter(rank == "gold") %>%
   filter(!is.na(year)) %>%
   filter(!is.na(type)) %>%
@@ -1637,28 +1724,31 @@ all86k %>%
   filter(!is.na(strain)) %>%
   select(sample, year, pT181contigSA) %>%
   distinct() %>% 
-  mutate(PT181presenceAbsence = ifelse(is.na(pT181contigSA), "no p1T81", "pT181+")) %>%
+  mutate(PT181presenceAbsence = ifelse(is.na(pT181contigSA),
+                                       "no p1T81", "pT181+")) %>%
   ggplot(aes(x = as.numeric(year), fill = PT181presenceAbsence)) +
   geom_histogram() +
-  theme_bw() +
+  theme_bw(base_size = 16) +
   labs(y = "Sample count",
        x = "Year of Collection",
        fill = "pT181 presence/absence"
-       ) +
-  theme(axis.text = element_text(size = 13),
-        axis.title = element_text(size = 13))
+       ) #+
+ # theme(axis.text = element_text(size = 14),
+  #      axis.title = element_text(size = 14))
+fig1a
 
-set2.5 %>%
+fig1b <- set2.5 %>%
   mutate(top7strain = fct_lump_n(strain,7)) %>%
   ggplot(aes(x = as.numeric(year), fill = top7strain)) +
   geom_histogram() +
   labs(y = "Sample count",
        x = "Year of Collection",
        fill = "Strain") +
-  theme_bw() +
-  scale_fill_manual(values = top7strain2.5) +
-  theme(axis.text = element_text(size = 13),
-        axis.title = element_text(size = 13))
+  theme_bw(base_size = 16) +
+  scale_fill_manual(values = top7strain2.5) #+
+ # theme(axis.text = element_text(size = 14),
+  #      axis.title = element_text(size = 14))
+fig1b
 ```
 
 ```{r how many strains was pT181 detected in?}
@@ -1694,45 +1784,8 @@ summary(logit.prev)
 ```
 
 # Fig. 6A: sc x time figure
-```{r prop sc by time (Fig. 6A)}
-scatterSC <- set2.5backup %>%
-  select(sample, issinglecopy, year) %>%
-  mutate(copynumber = ifelse(issinglecopy==T, "Single-copy", "Multicopy")) %>%
-  group_by(copynumber, year) %>%
-  mutate(countCNyear = n()) %>%
-  pivot_wider(names_from = copynumber, values_from = countCNyear) %>%
-  select(-sample, -issinglecopy) %>%
-  distinct() %>%
-  summarise_each(funs(sum(., na.rm = TRUE))) %>%
-  mutate(propSC = `Single-copy`/(`Single-copy` + Multicopy)) %>%
-  ggplot(aes(x = as.numeric(year), y = propSC)) +
-  geom_point() +
-  ylim(0,1) +
-  labs(x = "Year of Collection",
-       y = "Proportion Single-copy") +
-  theme_bw() +
-  geom_smooth(method = "lm", se = F)
 
-scatterSC
-```
-
-```{r Fig. 6A reg}
-dataforproplm <- set2.5backup %>%
-  select(sample, issinglecopy, year) %>%
-  mutate(copynumber = ifelse(issinglecopy==T, "Single-copy", "Multicopy")) %>%
-  group_by(copynumber, year) %>%
-  mutate(countCNyear = n()) %>%
-  pivot_wider(names_from = copynumber, values_from = countCNyear) %>%
-  select(-sample, -issinglecopy) %>%
-  distinct() %>%
-  summarise_each(funs(sum(., na.rm = TRUE))) %>%
-  mutate(propSC = `Single-copy`/(`Single-copy` + Multicopy))
-
-lm(propSC ~ as.numeric(year), data = dataforproplm) %>%
-  summary()
-```
-
-```{r added 2025-09-15: logistic regression on SC}
+```{r logistic regression on SC for Fig. 6A}
 set2.5backup %>%
   select(sample, issinglecopy, year)
 
@@ -1741,6 +1794,56 @@ logit.sc <- glm(issinglecopy ~ as.numeric(year), data = set2.5backup,
 
 summary(logit.sc)
 ```
+replace linear reg. stats with this in revision
+
+also check with S99.5_27 removed
+```{r}
+#not27 <- set2.5backup %>%
+not27 <- set2.5 %>%
+  select(sample, issinglecopy, year, strain) %>%
+  filter(strain != "S99.5_27")
+
+logit.sc.not27 <- glm(issinglecopy ~ as.numeric(year), data = not27,
+    family = binomial(link = "logit")) 
+
+summary(logit.sc.not27)
+```
+
+
+trying plot with logit reg
+```{r editing Fig. 6A to have logit curve}
+#set2.5backup %>%
+fig6a <- set2.5 %>%
+  select(sample, issinglecopy, year) %>%
+  mutate(copynumber = ifelse(issinglecopy==T, "Single-copy", "Multicopy")) %>%
+  group_by(copynumber, year) %>%
+  mutate(countCNyear = n()) %>%
+  pivot_wider(names_from = copynumber, values_from = countCNyear) %>%
+  select(-sample, -issinglecopy) %>%
+  distinct() %>%
+  summarise(across(everything(), ~sum(.x, na.rm = TRUE))) %>%
+  mutate(propSC = `Single-copy`/(`Single-copy` + Multicopy),
+         totalCount = `Single-copy` + Multicopy) %>%
+  ggplot(aes(x = as.numeric(year), y = propSC)) +
+  geom_point(aes(color = totalCount)) +
+ # ylim(0,1) +
+  labs(x = "Year of Collection",
+       y = "Proportion Single-copy") +
+  theme_bw(base_size = 16) +
+#  geom_smooth(data = set2.5backup,
+  geom_smooth(data = set2.5,
+              aes(x = as.numeric(year), y = as.numeric(issinglecopy)),
+              method = "glm",
+              method.args = list(family = binomial(link = "logit")),
+              se = TRUE) +
+  scale_color_continuous(trans = "log", name = "Sample count",
+                          low = "lightblue", high = "darkblue",
+                          breaks = scales::breaks_log(),
+                          labels = scales::label_number(accuracy = 1))
+fig6a
+```
+
+
 
 Check - how many isolates were collected before 1950?
 ```{r pre-1950}
@@ -1755,14 +1858,18 @@ strain breakdown: 3 NA, 3 S21, 1 S5, 1 S15
 # Thresholding: why >= 4400bp for present
 
 ```{r Fig. 9 understanding blast hit distribution}
+# exploration
 summary(totallength)
 
-totallength %>%
+# overall distribution *for figure*
+fig9main <- totallength %>%
   ggplot(mapping = aes(x = length)) + 
   geom_histogram(binwidth = 100) +
   xlab("sum of blast hit length") +
-  theme_bw()
+  theme_bw(base_size = 16)
+fig9main
 
+# zooming in for exploration
 totallength %>%
   filter(length >= 3500 & length <= 4800) %>%
   ggplot(mapping = aes(x = length)) + 
@@ -1773,13 +1880,16 @@ totallength %>%
     labels = c(3500,3600,3700,3800,3900,4000,4100,4200,
                4300,4400,4500,4600,4700,4800))
 
-totallength %>%
+# inset *for figure*
+fig9inset <- totallength %>%
   filter(length >= 4200 & length <= 4600) %>%
   ggplot(mapping = aes(x = length)) + 
   geom_histogram(bins = 30) +
   xlab("sum of blast hit length") +
-  theme_bw()
+  theme_bw(base_size = 16)
+fig9inset
 
+# zooming in for exploration
 totallength %>%
   filter(length >= 4400 & length <= 4500) %>%
   ggplot(mapping = aes(x = length)) + 
@@ -1832,8 +1942,9 @@ cvD %>%
 
 ## join with gene positions to be able to pick apart core / pT181 / other contigs
 ```{r load contig lengths}
-depth_pcn_allSA <- read_table2("20240321-depth-pcn-allSA.txt", 
-    col_names = FALSE)
+#depth_pcn_allSA <- read_table2("20240321-depth-pcn-allSA.txt", 
+depth_pcn_allSA <- read_table2("~/Desktop/Read_Lab/20240321-depth-pcn-allSA.txt",
+                               col_names = FALSE)
 
 depth_pcn_allSA <- depth_pcn_allSA %>%
   rename("Experiment" = "X1", "contigOGname" = "X2",
@@ -1841,7 +1952,8 @@ depth_pcn_allSA <- depth_pcn_allSA %>%
 ```
 
 ```{r}
-alldepthsC <- merge(alldepths1, depth_pcn_allSA, by = c("Experiment", "avgDepth"))
+alldepthsC <- merge(alldepths1, depth_pcn_allSA,
+                    by = c("Experiment", "avgDepth"))
 
 left_join(cvDstat, alldepthsC, by = c("sample" = "Experiment",
                                      "contig" = "contigOGname"))
@@ -1867,12 +1979,14 @@ length of contig does NOT impact coefficient of variation
 
 
 ```{r Fig. 12 coevar by loc}
-left_join(cvDstat, alldepthsC, by = c("sample" = "Experiment",
+fig12 <- left_join(cvDstat, alldepthsC, by = c("sample" = "Experiment",
                                      "contig" = "contigOGname")) %>%
   ggplot(aes(x = coevar)) +
   geom_density() +
   facet_wrap(~loc, nrow = 1) +
-  theme_bw()
+  theme_bw(base_size = 16) +
+  xlab("Coefficient of Variation of Read Depth")
+fig12
 ```
 loc doesn't matter for coevar, curves look pretty much the same
 
@@ -1900,7 +2014,8 @@ we need to check and see if what I'm doing for linearization is impacting estima
 load the start positions
 ```{r saccver & rename}
 # most samples
-startMost <- read_delim("technicalLin/saccversstart.txt", 
+#startMost <- read_delim("technicalLin/saccversstart.txt", 
+startMost <- read_delim("~/Desktop/Read_Lab/technicalLin/saccversstart.txt",
     delim = "\t", escape_double = FALSE, 
     col_names = FALSE, trim_ws = TRUE)
 
@@ -1910,7 +2025,8 @@ startMost <- startMost %>%
          "start-1" = "X3")
 
 # nonSA samples
-startnonSA <- read_delim("technicalLin/nonSA-saccversstart.txt", 
+# startnonSA <- read_delim("technicalLin/nonSA-saccversstart.txt", 
+startnonSA <- read_delim("~/Desktop/Read_Lab/technicalLin/nonSA-saccversstart.txt",
     delim = "\t", escape_double = FALSE, 
     col_names = FALSE, trim_ws = TRUE)
 
@@ -1923,7 +2039,8 @@ startnonSA <- startnonSA %>%
           sample.contig !="JX893516.1")
 
 # stragglers
-startstrag <- read_delim("technicalLin/strag-saccversstart.txt", 
+#startstrag <- read_delim("technicalLin/strag-saccversstart.txt", 
+startstrag <- read_delim("~/Desktop/Read_Lab/technicalLin/strag-saccversstart.txt", 
     delim = "\t", escape_double = FALSE, 
     col_names = FALSE, trim_ws = TRUE)
 startstrag <- startstrag %>%
@@ -2068,19 +2185,21 @@ lindf %>%
 ```
 
 ## correlation between start & pos
-```{r Fig. S3}
+```{r Fig. S4}
 # DRX100326 starts at 3084 relative to blast query
 lindf <- lindf %>%
   mutate(aheadby = start - 3084)
 
-lindf %>%
+# fig
+figS4 <- lindf %>%
   filter(start < 4439) %>%
   filter(!is.na(TYPE)) %>%
   ggplot(aes(x = start, y = POS, color = TYPE)) +
   geom_point() +
   labs(x = "hitStart",
        y = "Mutation Position") +
-  theme_bw()
+  theme_bw(base_size = 16)
+figS4
 
 lindf %>%
   filter(start < 5000) %>%
@@ -2609,7 +2728,7 @@ position14 %>%
 ```
 
 ```{r Fig. S3: region of pT181 insertion in complete chrom}
-position14 %>%
+figS3 <- position14 %>%
   filter(start > 55000 & end < 90000) %>%
   filter(!is.na(symbol)) %>%
   select(gene:samplematch) %>%
@@ -2619,11 +2738,13 @@ position14 %>%
            symbol != "pre") %>%
   ggplot(aes(x = symbol, fill = species_category)) + 
   geom_bar() +
-  theme_bw() +
+  theme_bw(base_size = 16) +
   theme(axis.text.x = element_text(angle = 90)) +
   labs(x = "gene",
        y = "# genomes found in",
        fill = "gene category")
+
+figS3
 ```
 
 
